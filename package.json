@@ -1,0 +1,18 @@
+{
+  "name": "moread",
+  "productName": "墨读",
+  "version": "2.0.0",
+  "description": "墨读 · Windows 桌面阅读器（本地书 + Legado 书源 + 网页搜书 + 坚果云同步）",
+  "main": "src/main.js",
+  "author": "MoRead",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "node build/pack.js",
+    "dist": "node build/pack.js"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-packager": "^17.1.2"
+  }
+}

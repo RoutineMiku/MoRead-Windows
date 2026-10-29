@@ -1,0 +1,15 @@
+# Electron 运行时依赖，用 npm install 还原
+node_modules/
+
+# 打包产物（含 Electron 运行时，单个 zip 就 200MB+，走 GitHub Releases）
+dist/
+
+# 运行时数据 / 截图临时产物
+data/
+.tmp-*/
+*.log
+
+# 系统文件
+Thumbs.db
+.DS_Store
+desktop.ini
