@@ -139,8 +139,10 @@ class MainActivity : AppCompatActivity() {
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
-            useWideViewPort = true
-            loadWithOverviewMode = true
+            // 必须关掉：开着会让 WebView 按 980px 虚拟视口渲染再整页缩小，
+            // 界面变成 1/3 大小、触摸目标只有十几像素，点不准也点不动
+            useWideViewPort = false
+            loadWithOverviewMode = false
             textZoom = 100
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE

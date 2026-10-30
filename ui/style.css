@@ -496,27 +496,43 @@ html[data-layout]{
   --sa-top:0px;--sa-bottom:0px;--sa-left:0px;--sa-right:0px;
   --appbar:52px;
 }
-html[data-layout] body{-webkit-tap-highlight-color:rgba(43,108,224,.12);}
+html[data-layout] body{
+  -webkit-tap-highlight-color:rgba(43,108,224,.12);
+  /* 别让 WebView 自作主张缩放文字，否则横竖屏切换时字号会变 */
+  -webkit-text-size-adjust:100%;text-size-adjust:100%;
+  /* 桌面版 14px 是给鼠标 + 一臂距离看的，手机上偏小，整体抬一档 */
+  font-size:15px;
+}
 html[data-layout] .app{height:100%;padding-top:var(--sa-top);}
 html[data-layout] .winbtns{display:none;}          /* 安卓没有自绘窗口按钮 */
 html[data-layout] .dropzone{display:none!important;}
+/* 去掉双击缩放带来的 300ms 点击延迟，顺手让点击反馈即时 */
+html[data-layout] button,
+html[data-layout] .btn,
+html[data-layout] .rail-btn,
+html[data-layout] .tb-btn,
+html[data-layout] .icbtn,
+html[data-layout] .rb-btn,
+html[data-layout] .card{touch-action:manipulation;}
 /* 顶部应用栏：给状态栏留位，去掉桌面版的拖拽语义 */
 html[data-layout] .titlebar{
   height:var(--appbar);flex:0 0 var(--appbar);padding:0 6px 0 14px;
   background:rgba(255,255,255,.9);border-bottom:1px solid rgba(0,0,0,.06);
   -webkit-app-region:no-drag;
 }
-html[data-layout] .tb-btn{width:40px;height:40px;}
-html[data-layout] .tb-btn svg{width:19px;height:19px;}
+html[data-layout] .brand .logo{width:28px;height:28px;font-size:15px;}
+html[data-layout] .bname{font-size:15px;}
+html[data-layout] .tb-btn{width:44px;height:44px;}
+html[data-layout] .tb-btn svg{width:22px;height:22px;}
 html[data-layout] .tb-title{display:none;}
 html[data-layout] .shell{min-height:0;overflow:hidden;}
 html[data-layout] .main{overflow:hidden;}
 
-/* 触摸热区：所有可点元素不小于 40px */
+/* 触摸热区：所有可点元素不小于 44px（Material 建议 48dp，这里取折中） */
 html[data-layout] .rail-btn,
 html[data-layout] .rb-btn,
 html[data-layout] .icbtn,
-html[data-layout] .btn{min-height:40px;}
+html[data-layout] .btn{min-height:44px;}
 
 /* 横屏 / 展开态：沿用桌面版的左侧栏 */
 html[data-layout="landscape"] .rail{
@@ -541,11 +557,12 @@ html[data-layout="portrait"] .rail{
 html[data-layout="portrait"] .rail::-webkit-scrollbar{display:none;}
 html[data-layout="portrait"] .rail-gap{display:none;}
 html[data-layout="portrait"] .rail-btn{
-  flex:1 1 0;min-width:46px;width:auto;padding:6px 2px 5px;gap:3px;
-  font-size:10.5px;border-radius:0;background:transparent;box-shadow:none;
-  justify-content:center;
+  /* 七个入口：min-width 取 44px，窄屏上也能一排放下（7×44=308 < 320），宽屏则由 flex 平分 */
+  flex:1 1 0;min-width:44px;width:auto;padding:8px 2px 6px;gap:4px;
+  font-size:11px;border-radius:0;background:transparent;box-shadow:none;
+  justify-content:center;min-height:52px;
 }
-html[data-layout="portrait"] .rail-btn svg{width:21px;height:21px;}
+html[data-layout="portrait"] .rail-btn svg{width:24px;height:24px;}
 html[data-layout="portrait"] .rail-btn:hover{background:transparent;color:#5c6472;}
 html[data-layout="portrait"] .rail-btn.active{background:transparent;color:var(--accent);box-shadow:none;}
 html[data-layout="portrait"] .rail-btn.active svg{stroke-width:2;}
@@ -581,7 +598,7 @@ html[data-layout="portrait"] .modal{
 html[data-layout="portrait"] .modal.wide{width:100%;}
 html[data-layout="portrait"] .modal-actions{position:sticky;bottom:0;background:#fff;padding-top:12px;}
 html[data-layout="portrait"] .modal .form-grid{grid-template-columns:1fr;}
-html[data-layout="portrait"] .toast{bottom:calc(78px + var(--sa-bottom));}
+html[data-layout="portrait"] .toast{bottom:calc(96px + var(--sa-bottom));}
 
 /* ---------------- 阅读器 ---------------- */
 html[data-layout] .reader-top{padding:calc(var(--sa-top)) 12px 0;height:calc(54px + var(--sa-top));flex-basis:calc(54px + var(--sa-top));}
@@ -606,3 +623,25 @@ html[data-layout] .tb-group::-webkit-scrollbar{display:none;}
 
 /* 横屏时右下角的悬浮操作留出导航栏空间 */
 html[data-layout] .rg-tools{padding-bottom:calc(10px + var(--sa-bottom));}
+
+/* ==================================================================
+ * 兜底：万一原生侧没能把形态推给页面（初始化异常、WebView 过旧、桥接失败……）
+ * 触屏设备也必须按移动端呈现，绝不能退回电脑版的小控件和窗口按钮。
+ * pointer:coarse = 手指操作（安卓 WebView）；桌面鼠标是 fine，不受影响。
+ * ================================================================== */
+@media (pointer: coarse) {
+  html:not([data-layout]) .winbtns{display:none!important;}
+  html:not([data-layout]) .dropzone{display:none!important;}
+  html:not([data-layout]) .tb-title{display:none;}
+  html:not([data-layout]) body{
+    -webkit-text-size-adjust:100%;text-size-adjust:100%;
+    -webkit-tap-highlight-color:rgba(43,108,224,.12);
+  }
+  html:not([data-layout]) .tb-btn{width:44px;height:44px;}
+  html:not([data-layout]) .tb-btn svg{width:22px;height:22px;}
+  html:not([data-layout]) .rail-btn,
+  html:not([data-layout]) .rb-btn,
+  html:not([data-layout]) .icbtn,
+  html:not([data-layout]) .btn{min-height:44px;touch-action:manipulation;}
+  html:not([data-layout]) .rail-btn svg{width:22px;height:22px;}
+}

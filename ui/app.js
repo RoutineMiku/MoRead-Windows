@@ -2638,8 +2638,28 @@
   /* ===========================================================
      安卓适配：返回键层级 / 横竖屏切换 / 外部打开文件
      =========================================================== */
+
+  /** 摘掉桌面端专属的界面元素，并保证「这是移动布局」的标记一定在。
+   *  多处调用（nodebundle 早期、这里、以及布局回调），任何一处生效即可。 */
+  function stripDesktopChrome() {
+    try {
+      const de = document.documentElement;
+      de.classList.add('is-android');
+      if (!de.getAttribute('data-layout')) de.setAttribute('data-layout', 'portrait');
+      document.querySelectorAll('.winbtns, .dropzone').forEach(el => {
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      });
+      // 兜底：就算 DOM 摘不掉，也用行内样式压住，绝不让关闭按钮露出来
+      document.querySelectorAll('.winbtns').forEach(el => { el.style.setProperty('display', 'none', 'important'); });
+    } catch (e) { /* ignore */ }
+  }
+
   function bindAndroid() {
     if (!IS_ANDROID) return;
+
+    /* 桌面 Electron 的自绘窗口按钮（最小化/最大化/关闭）在安卓上没有任何意义，
+       直接从 DOM 摘掉；同时确保布局标记在——后面任何一步出问题也不会退回电脑版界面 */
+    stripDesktopChrome();
 
     /* 返回键：弹窗 → 目录抽屉 → 全屏 → 阅读器 → 回书架 → 系统（再按一次退出） */
     window.__moreadOnBack = () => {

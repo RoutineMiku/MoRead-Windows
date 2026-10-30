@@ -202,13 +202,45 @@ function makeSandbox() {
       };
     }
   };
+  /* 真实记录状态的 DOM 桩：用来验证「布局标记一定打得上、桌面窗口按钮一定被摘掉」 */
+  const domAttrs = {};
+  const domClasses = new Set();
+  const removed = [];
+  const mkEl = name => ({
+    __el: name,
+    style: { setProperty() { } },
+    parentNode: {
+      removeChild(el) {
+        removed.push(el.__el);
+        if (el.__el === '.winbtns') winbtns = null;
+        else if (el.__el === '.dropzone') dropzone = null;
+      }
+    }
+  });
+  let winbtns = mkEl('.winbtns');
+  let dropzone = mkEl('.dropzone');
   const doc = {
+    __attrs: domAttrs, __classes: domClasses, __removed: removed,
+    readyState: 'complete',
     body: { classList: { add() { }, remove() { }, toggle() { }, contains: () => false } },
     documentElement: {
-      setAttribute() { }, getAttribute: () => 'portrait',
+      setAttribute(k, v) { domAttrs[k] = String(v); },
+      getAttribute(k) { return k in domAttrs ? domAttrs[k] : null; },
+      classList: { add(c) { domClasses.add(c); }, remove(c) { domClasses.delete(c); }, contains: c => domClasses.has(c) },
       style: { setProperty() { } }, addEventListener() { }, dispatchEvent() { }
     },
-    addEventListener() { }, dispatchEvent() { }, querySelector: () => null, querySelectorAll: () => []
+    addEventListener() { }, dispatchEvent() { },
+    querySelector(sel) {
+      if (sel === '.winbtns') return winbtns;
+      if (sel === '.dropzone') return dropzone;
+      return null;
+    },
+    querySelectorAll(sel) {
+      const out = [];
+      if (sel.includes('.winbtns') && winbtns) out.push(winbtns);
+      if (sel.includes('.dropzone') && dropzone) out.push(dropzone);
+      return out;
+    }
   };
   const sb = {
     window: win, document: doc, self: win,
@@ -240,6 +272,13 @@ async function run() {
 
   ok('bridge 加载后 window.mo 就绪', !!win.mo);
   ok('Web Speech API 已被原生接管', typeof win.SpeechSynthesisUtterance === 'function');
+
+  /* ---- 0. 界面形态：这两个没生效，界面就会退回电脑版（小控件 + 右上角关闭按钮） ---- */
+  const D = sb.document;
+  ok('布局标记已打上 data-layout', !!D.__attrs['data-layout'], D.__attrs['data-layout']);
+  ok('已标记 is-android', D.__classes.has('is-android'));
+  ok('桌面窗口按钮已摘除', D.__removed.includes('.winbtns'), D.__removed.join(',') || '(无)');
+  ok('桌面拖放区已摘除', D.__removed.includes('.dropzone'));
 
   const mo = win.mo;
 

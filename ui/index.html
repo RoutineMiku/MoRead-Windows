@@ -2,6 +2,9 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
+<!-- 安卓 WebView 默认按 980px 宽的虚拟视口渲染再整页缩小，不写这句界面会缩成 1/3、
+     图标只有十几物理像素，点也点不准。桌面 Chromium 不使用移动视口，这句对它无效。 -->
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
 <title>墨读</title>
 <link rel="stylesheet" href="style.css" />
 </head>

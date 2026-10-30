@@ -15,6 +15,32 @@
   if (typeof MoNativeBridge === 'undefined') return;   // 桌面环境：什么都不做
 
   /* ==================================================================
+   * 0. 最先做的事：给页面打上「这是安卓」的标记，并摘掉桌面端窗口按钮
+   *
+   *    必须放在最前面。这个文件九百多行的初始化里任何一步失败
+   *    （原生目录没建好、存档损坏、某个模块抛错……）都不应该让界面
+   *    退回成电脑版的样子——小控件 + 右上角最小化/最大化/关闭。
+   * ================================================================== */
+  function markAndroid() {
+    try {
+      var de = document.documentElement;
+      de.classList.add('is-android');
+      if (!de.getAttribute('data-layout')) de.setAttribute('data-layout', 'portrait');
+      // 桌面 Electron 的自绘窗口按钮，安卓上直接摘掉（比 display:none 更彻底）
+      var wb = document.querySelector('.winbtns');
+      if (wb && wb.parentNode) wb.parentNode.removeChild(wb);
+      var dz = document.querySelector('.dropzone');
+      if (dz && dz.parentNode) dz.parentNode.removeChild(dz);
+    } catch (e) { /* 界面标记失败也不能影响后续 */ }
+  }
+  markAndroid();
+  // bridge.js 在 body 末尾，此时 .winbtns 已存在；仍兜一层，防止将来挪到 head
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', markAndroid);
+  }
+  window.__moreadMarkAndroid = markAndroid;
+
+  /* ==================================================================
    * 1. 原生通道
    * ================================================================== */
   const NB = {
@@ -1137,18 +1163,23 @@
    *     portrait 竖屏（底部导航）｜ landscape 横屏（左侧栏）｜ wide 展开态（左侧宽栏）
    * ================================================================== */
   function applyLayout(mode, info) {
-    document.documentElement.setAttribute('data-layout', mode);
-    const root = NB.call('env.insets');
-    const ins = (info && info.insets) || root || {};
+    // 先保证形态标记一定在（安全区取不到也不能把布局搞没）
+    document.documentElement.setAttribute('data-layout', mode || 'portrait');
+    document.documentElement.classList.add('is-android');
+    let ins = (info && info.insets) || null;
+    if (!ins) {
+      try { ins = NB.call('env.insets'); } catch (e) { ins = null; }
+    }
+    ins = ins || {};
     document.documentElement.style.setProperty('--sa-top', (ins.top || 0) + 'px');
     document.documentElement.style.setProperty('--sa-bottom', (ins.bottom || 0) + 'px');
     document.documentElement.style.setProperty('--sa-left', (ins.left || 0) + 'px');
     document.documentElement.style.setProperty('--sa-right', (ins.right || 0) + 'px');
-    // 首次进来也主动问一次，避免 INS 未知导致刘海被挡
+    // 首次进来也主动问一次形态，避免只按竖屏渲染
     try {
       const l = NB.call('env.layout');
-      document.documentElement.setAttribute('data-layout', l.mode || mode);
+      if (l && l.mode) document.documentElement.setAttribute('data-layout', l.mode);
     } catch (e) { /* keep */ }
   }
-  applyLayout('portrait', null);
+  try { applyLayout('portrait', null); } catch (e) { markAndroid(); }
 })();
