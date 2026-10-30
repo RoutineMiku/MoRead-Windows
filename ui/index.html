@@ -82,7 +82,19 @@
     add('视口', window.innerWidth + ' × ' + window.innerHeight + '   dpr=' + window.devicePixelRatio);
     add('形态标记', document.documentElement.getAttribute('data-layout') + ' / ' + document.documentElement.getAttribute('data-sw'));
     add('原生对象 MoNativeBridge', typeof MoNativeBridge);
+    add('设备 WebView（系统提供）', (function () {
+      try { return JSON.parse(call('env.webview')).pkg; } catch (e) { return '读取失败'; }
+    })());
     add('桥 env.info', call('env.info'));
+    add('兼容层初始化步骤', (function () {
+      var s = window.__moreadSteps;
+      if (!s || !s.length) return '（无记录 —— 兼容层根本没开始执行）';
+      var out = [];
+      for (var i = 0; i < s.length; i++) {
+        out.push((s[i].ok ? '✓ ' : '✗ ') + s[i].n + '  ' + s[i].ms + 'ms' + (s[i].e ? '\n    ' + s[i].e : ''));
+      }
+      return out.join('\n');
+    })());
     add('桥 env.layout', call('env.layout'));
     add('桥 env.insets', call('env.insets'));
     add('bundle 已执行', typeof window.__MOREAD_MODULES__ !== 'undefined' ? '是（' + Object.keys(window.__MOREAD_MODULES__).join(',') + '）' : '否');

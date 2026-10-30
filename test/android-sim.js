@@ -39,6 +39,7 @@ function callSync(name, json) {
   const abs = p => (path.isAbsolute(p) ? p : path.join(DATA, p));
 
   if (name === 'env.info') return R({ app: 'moread', platform: 'android', version: '2.1.0', paths: { root: DATA } });
+  if (name === 'env.webview') return R({ pkg: 'com.android.webview（测试桩）' });
   if (name === 'env.layout') return R({ mode: 'portrait', sw: 360, bucket: 'compact' });
   if (name === 'env.insets') return R({ top: 24, bottom: 16, left: 0, right: 0 });
   // 屏幕圆角（模拟一台四角 32px 圆角的手机）

@@ -242,6 +242,14 @@ async function diagScenario() {
     `(function(){var p=document.getElementById('mo-diag');return p?(p.innerText||p.textContent):''})()`, true);
   const netLine = (txt.match(/联网测试：.*/) || ['（没读到）'])[0];
   ok('自检面板能打开', txt.length > 200);
+  ok('设备 WebView 有包名', /设备 WebView（系统提供）[\s\S]{0,60}webview/.test(txt),
+    (txt.match(/设备 WebView（系统提供）[\s\S]{0,80}/) || [''])[0].replace(/\n/g, ' '));
+  ok('初始化步骤全部成功', (function () {
+    var m = txt.match(/兼容层初始化步骤[\s\S]{0,400}/);
+    if (!m) return false;
+    var seg = m[0];
+    return /✓ env\.info/.test(seg) && /✓ store\.init/.test(seg) && !/✗/.test(seg);
+  })(), (txt.match(/兼容层初始化步骤[\s\S]{0,300}/) || [''])[0].replace(/\n\s*/g, ' | '));
   ok('bundle 已执行', /bundle 已执行[\s\S]{0,80}是/.test(txt));
   ok('文件读写一致 = OK', /文件读写一致[\s\S]{0,40}OK/.test(txt));
   ok('大文件 XHR 一致 = OK', /大文件 XHR[\s\S]{0,90}OK/.test(txt));

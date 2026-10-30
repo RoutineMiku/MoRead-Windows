@@ -40,6 +40,21 @@
   }
   window.__moreadMarkAndroid = markAndroid;
 
+  /* 初始化步骤留痕：真机上若 window.mo 起不来，自检面板能直接指出卡在哪一步 */
+  window.__moreadSteps = [];
+  function step(name, fn) {
+    var t0 = Date.now();
+    try {
+      var r = fn();
+      window.__moreadSteps.push({ n: name, ok: true, ms: Date.now() - t0 });
+      return r;
+    } catch (e) {
+      window.__moreadSteps.push({ n: name, ok: false, ms: Date.now() - t0, e: String((e && (e.message || e)) || '').slice(0, 300) });
+      throw e;
+    }
+  }
+  window.__moreadStep = step;
+
   /* ==================================================================
    * 1. 原生通道
    * ================================================================== */
@@ -560,18 +575,18 @@
   /* ==================================================================
    * 6. 载入桌面版的数据/网络/格式模块
    * ================================================================== */
-  const env = NB.call('env.info');
+  const env = step('env.info（原生桥）', () => NB.call('env.info'));
   const ROOT = (env.paths && env.paths.root) || '/moread';
 
   let store, netMod, legado, parseMod, webdavMod, zipMod;
   try {
-    zipMod = requireImpl('./zip');
-    netMod = requireImpl('./net');
-    webdavMod = requireImpl('./webdav');
-    legado = requireImpl('./legado');
-    parseMod = requireImpl('./parse');
-    store = requireImpl('./store');
-    store.init(ROOT);
+    zipMod = step('加载 zip', () => requireImpl('./zip'));
+    netMod = step('加载 net', () => requireImpl('./net'));
+    webdavMod = step('加载 webdav', () => requireImpl('./webdav'));
+    legado = step('加载 legado', () => requireImpl('./legado'));
+    parseMod = step('加载 parse', () => requireImpl('./parse'));
+    store = step('加载 store', () => requireImpl('./store'));
+    step('store.init', () => store.init(ROOT));
   } catch (e) {
     NB.fire('app.log', { level: 'error', msg: '模块初始化失败: ' + (e && e.stack || e) });
     throw e;

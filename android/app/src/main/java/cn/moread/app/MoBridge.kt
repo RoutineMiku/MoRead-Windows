@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import android.webkit.JavascriptInterface
+import android.webkit.WebView
 import cn.moread.app.util.fromB64
 import org.json.JSONObject
 import java.util.Locale
@@ -131,6 +132,16 @@ class MoBridge(private val act: MainActivity) {
     }
 
     /* ---------------- 环境信息 ---------------- */
+    /** 设备当前提供 WebView 实现的那个包。返回 null/未知说明系统 WebView 有问题——
+     *  这是国产 ROM 上「界面能出来但 JS 全哑」的高频原因，必须能一眼看到。 */
+    private fun webviewPkg(): String = try {
+        val pi = WebView.getCurrentWebViewPackage()
+        if (pi == null) "null（系统未提供 WebView，功能会全部失效）"
+        else "${pi.packageName} ${pi.versionName}"
+    } catch (e: Throwable) {
+        "读取失败: ${e.message}"
+    }
+
     private fun env(op: String, a: JSONObject): JSONObject = when (op) {
         "info" -> {
             val paths = JSONObject()
@@ -145,10 +156,12 @@ class MoBridge(private val act: MainActivity) {
                 .put("sdk", Build.VERSION.SDK_INT)
                 .put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
                 .put("paths", paths)
+                .put("webview", webviewPkg())
         }
         "layout" -> act.layoutInfo()
         "insets" -> act.insetInfo()
         "corners" -> act.cornerInfo()
+        "webview" -> JSONObject().put("pkg", webviewPkg())
         else -> throw IllegalArgumentException("未知环境查询: $op")
     }
 

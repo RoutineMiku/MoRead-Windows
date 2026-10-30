@@ -74,6 +74,9 @@ module.exports = function createNative(cfg) {
       if (name === 'env.corners') {
         return R(cfg.corners || { tl: 0, tr: 0, bl: 0, br: 0 });
       }
+      if (name === 'env.webview') {
+        return R({ pkg: 'com.android.webview 130.0.6723.99（测试桩）' });
+      }
 
       if (name.startsWith('file.')) {
         switch (name.slice(5)) {
