@@ -9,19 +9,13 @@ data/
 .tmp-*/
 *.log
 
-# 安卓构建（产物与离线工具链都很大，按需本地生成）
+# 本地工具链 / 测试运行目录（体积大，且只在本机有意义）
 .androidenv/
-android/.gradle/
-android/build/
-android/app/build/
-android/local.properties
-android/app/src/main/assets/nodebundle.js
-android/app/src/main/assets/ui/
+test/.run/
+android/
 
 # 系统文件
 Thumbs.db
 .DS_Store
 desktop.ini
 
-# 安卓 UI 仿真运行目录
-test/.run/

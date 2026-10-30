@@ -1,15 +1,12 @@
-# 墨读 · 阅读器（Windows + Android）
+# 墨读 · 开源阅读 Windows 版
 
-![Electron](https://img.shields.io/badge/Electron-45-47848F?logo=electron) ![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android) ![License](https://img.shields.io/badge/License-MIT-green)
+![Electron](https://img.shields.io/badge/Electron-45-47848F?logo=electron) ![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows) ![License](https://img.shields.io/badge/License-MIT-green)
 
 > 起因： <https://gedoor.github.io/download> 只有 Android 版的「开源阅读 Legado」，没有桌面端。
-> 这个项目按 Legado 的使用习惯重写了一版：**本地书 + Legado 书源 + 网页搜书 + 坚果云同步**，
-> 存档格式与原版「阅读」双向兼容。现在同时有 Windows 桌面版和安卓版，两边共用同一套界面与同一份书源/格式逻辑。
+> 这个项目按 Legado 的使用习惯重写了一版 Windows 桌面端：**本地书 + Legado 书源 + 网页搜书 + 坚果云同步**，
+> 存档格式与原版「阅读」双向兼容，可以直接导入原版「阅读」导出的 zip 备份。
 
-| 平台 | 入口 |
-| --- | --- |
-| Windows | `dist/墨读-win32-x64.zip` 解压后双击 `墨读.exe` |
-| Android | `dist/墨读-android.apk` 直接安装（覆盖安装即可升级） |
+**下载**：本仓库 Releases 里的 `墨读-win32-x64.zip`，解压后双击 `墨读.exe` 即可，免安装、不写注册表、数据跟着程序走。
 
 ![书架](docs/screenshots/shot_shelf.png)
 
@@ -24,119 +21,6 @@
 > 小坑：如果终端里设了 `ELECTRON_RUN_AS_NODE=1`，Electron 会以纯 Node 方式启动并立刻退出，
 > 用 `env -u ELECTRON_RUN_AS_NODE npm start` 即可。
 
-## 运行 · Android
-
-| 方式 | 说明 |
-| --- | --- |
-| 直接用 | 手机装上 `dist/墨读-android.apk`（Android 8.0 以上，debug 签名） |
-| 自己编译 | `npm run android:build` → `android/app/build/outputs/apk/debug/app-debug.apk` |
-| 不带 Android Studio | 第一次跑 `node build/prepare-android.js` 会下载好 JDK / SDK / Gradle 到 `.androidenv/`（约 500MB，之后离线可用） |
-| 无手机验证 | `npm run android:ui` 在电脑上用真实 Chromium 按真机尺寸跑一遍界面（157 项检查，见下文） |
-| 无手机验证（逻辑层） | `npm run android:sim` 在 Node 里把安卓那条链路跑一遍（详见「安卓实现原理」） |
-
-> 安装时若提示「未知来源」，在系统设置里允许来自此来源的安装即可（debug 包没有应用商店签名）。
-
-### 横屏 / 竖屏 / 折叠屏
-
-| 形态 | 布局 |
-| --- | --- |
-| **竖屏**（手机普通握持） | 功能切换在**屏幕底部**，七个入口横排；弹窗改成底部抽屉；书架三列；阅读器底部工具栏可横向滑动 |
-| **横屏** | 沿用**电脑版的左侧功能栏**，内容区占满宽度，书源/搜索工具条横向排布 |
-| **横屏 + 最小宽度 ≥ 600dp**（平板 / 折叠屏展开后横过来） | 左侧宽栏 + 更宽松的栅格，正文最大宽度放宽到 820px |
-| **竖屏 + 最小宽度 ≥ 600dp**（平板 / 折叠屏展开后竖着拿） | 导航**仍在底部**（竖向握持时底部比侧边顺手），栅格放宽到 4~5 列，正文居中限宽 680px |
-
-判定规则：**竖屏一律用底部导航，横屏一律用左侧栏**，最小宽度只影响栅格密度，不改变导航位置。
-方向由页面拿 `window.innerWidth/innerHeight` 自己判——原生推送可能丢、可能慢一拍，视口尺寸不会说谎；
-最小宽度（折叠屏折叠/展开会变）反过来只信原生。页面还会自己监听 `resize` / `orientationchange` / `visualViewport`，
-旋转后连补三次，避免拿到旋转前的旧尺寸。
-
-页面把结果写成 `<html data-layout="portrait|landscape|wide" data-sw="compact|medium|expanded">`，剩下的交给 CSS。
-**Activity 不重建**（`configChanges` 覆盖了 `orientation`、`smallestScreenSize`、`screenLayout`），正在读的章节不会丢。
-顶部/底部的安全区（刘海、手势条）通过 `env.insets` 传给页面，写成 `--sa-top` / `--sa-bottom` 等变量。
-
-**屏幕圆角（R 角）**：Android 12 以上从 `RoundedCorner` 读出四角半径，写成 `--corner-tl/tr/bl/br` 和 `--corner`；
-顶栏、竖屏底部导航、横屏侧栏、悬浮按钮、阅读区左右都会按它让开，内容不会被圆角切掉。
-
-### 安卓上的操作逻辑
-
-- **返回键 / 返回手势**按层级消费：弹窗 → 目录抽屉 → 全屏 → 退出阅读器 → 回到书架 → 再按一次退出应用
-- 在其他 App 里用「墨读」打开 `.txt` / `.epub` 会自动导入，打开备份 `.zip` 会直接进入恢复确认
-- 阅读时自动保持屏幕常亮，退出阅读恢复
-- 朗读走原生 `TextToSpeech`（安卓 WebView 的 `speechSynthesis` 不出声），音色列表来自手机已装的语音引擎
-- 导入/导出走系统文件管理器（SAF），不需要存储权限；数据都在应用私有目录
-- 横竖屏切换、折叠屏开合不会中断阅读；全屏按钮调用系统沉浸式，状态栏/导航栏一起隐藏
-
-## 安卓实现原理
-
-安卓版不是把逻辑重写一遍，而是让桌面版那套**已经用真机备份验证过**的代码原样跑起来。
-
-### 一句话：给 WebView 装一个 Node
-
-`src/store.js` `zip.js` `net.js` `webdav.js` `legado.js` `parse.js` 加起来不到 700 行，
-依赖只有 `fs` / `path` / `http` / `https` / `zlib` / `Buffer` —— 全是 Node 标准库。
-所以做法是补一层最小的 Node 运行时（`android/nodepoly/runtime.js`），把这六个模块原封不动塞进 WebView：
-
-| 需要 | 补出来的东西 |
-| --- | --- |
-| `Buffer` | `NodeBuffer extends Uint8Array`，够用即可（`readUInt32LE` / `toString('utf8')` / `slice` / `subarray`） |
-| `fs` / `path` / `os` / `util` / `querystring` / `stream` / `events` | 同步 API 的小实现，`EventEmitter` 自己写 |
-| `zlib` | 转调原生 `MoFiles.zlib`（inflateRaw / gunzip / deflate / gzip） |
-| `http` / `https` | 转调 OkHttp（`MoNet`） |
-| `require()` | CommonJS 外壳，模块源码内联进 `nodebundle.js` |
-
-打包由 `build/gen-nodebundle.js` 完成：把 `runtime.js` 和六个模块源码内联成
-`android/app/src/main/assets/nodebundle.js`（约 90 KB）。
-页面里 `<script src="bridge.js"></script>` 在安卓上会被 `shouldInterceptRequest` 换成它，
-桌面版 `ui/bridge.js` 是空文件 —— 所以同一份 `ui/` 两边都能用，**界面和书源逻辑只有一份**。
-
-### 桥：一次调用 = 一个 JSON 字符串
-
-`MoBridge.callSync(name, argsJson)` / `callFire(name, argsJson)`，按前缀分发：
-`http.` / `zlib.` / `file.` / `dialog.` / `tts.` / `env.` / `app.` / `win.` / `ui.`，
-失败统一返回 `{__error: "中文原因"}`，直接弹给使用者看。
-
-几个专门为安卓处理的地方：
-
-- **Binder 1MB 限制**：大文件不穿桥。`file.read` 超过 512KB（或判定为二进制）时返回
-  `{tooBig:true, abs:"file://..."}`，JS 端改用同步 `XMLHttpRequest` 直接读，避开 `TransactionTooLargeException`。
-- **PROPFIND / MKCOL**：`HttpURLConnection` 不支持这两个方法（坚果云要用），所以网络层用 OkHttp 4.12。
-- **过期证书**：不少小说站证书过期或自签，`MoNet` 备一个宽松 `X509TrustManager` 的 client，失败时降级重试。
-- **TTS**：安卓 WebView 的 `speechSynthesis` 存在但不出声，于是把 `speechSynthesis` / `SpeechSynthesisUtterance`
-  polyfill 成原生 `TextToSpeech`，`ui/app.js` 里的朗读逻辑一行没改。
-- **文件选择**：`ACTION_OPEN_DOCUMENT` / `ACTION_CREATE_DOCUMENT`（SAF），不申请存储权限，数据都在应用私有目录。
-
-### 不重建 Activity
-
-`AndroidManifest.xml` 里 `configChanges` 覆盖了
-`orientation|screenSize|screenLayout|smallestScreenSize|...`，配合 `resizeableActivity=true`、
-`screenOrientation="user"`：横竖屏切换、折叠屏开合都**不重建 Activity**，只在 `onConfigurationChanged`
-里把新形态推给页面。正在读的章节、滚动位置、没保存的输入都不会丢。
-
-### 没有手机也能验证
-
-有两层，都不需要手机或模拟器：
-
-**① 界面层 `npm run android:ui`（`test/android-e2e/`）**
-
-Electron 里开一个**真实的 Chromium**，加载**真实的 `ui/index.html`**，用 Node 实现一份
-`MoNativeBridge`（等价于 `MainActivity` 注入的原生层），然后按真机尺寸开窗口：
-
-| 场景 | 检查内容 |
-| --- | --- |
-| 手机竖屏 393×873 / 360×780、手机横屏 873×393 | 形态标记、功能栏位置（底部 / 左侧）、七个入口是否齐全、触摸目标 ≥ 40px |
-| 折叠屏展开竖握 717×1024 / 横握 1024×717、平板竖屏 / 横屏 | 同上，外加宽度档位 compact / medium |
-| 同一个窗口里改尺寸模拟旋转 | 旋转后形态与功能栏位置是否跟着变、按钮是否仍然可点 |
-| 兜底：兼容层脚本没被替换 / 完全没执行 | 布局是否仍然正确、桌面窗口按钮是否仍然被摘掉 |
-
-每个场景都会做**命中测试**（`elementFromPoint` 打在按钮中心，看最顶层元素是不是它）
-和**真点击**（点「设置」→ 视图切过去、高亮跟上 → 点回书架）。这两个检查就是为了抓
-「界面画出来了但点什么都没反应」「按钮被挤出屏幕」这类问题——它们不会抛异常，只靠肉眼很难发现。
-
-**② 逻辑层 `npm run android:sim`（`test/android-sim.js`）**
-
-在 Node 里把原生那几个方法重新实现一遍（`fs` / `zlib` / 弹窗 / 同步 HTTP 走子进程），
-再用 `vm` 跑真正的 `nodebundle.js`。33 项检查，其中包括：解析真实备份得到
-**43 本书 / 2916 个书源 / 1 条书签**（与桌面版完全一致）、一次真实联网抓取。
 
 ## 功能
 
@@ -242,18 +126,6 @@ test/             本地模拟站点 + 模拟 WebDAV + 备份/格式测试
 test/e2e-real.js  真实备份端到端验证（导入 → 抽书 → 联网拉目录/正文 → 出报告）
 test/probe.js     把任意 JS 片段放进真实应用里跑（调试规则/界面用）
 
-android/                       安卓版（Kotlin + WebView，共用上面的 src/ 与 ui/）
-├─ app/src/main/java/cn/moread/app/
-│  ├─ MainActivity.kt  WebView 配置、返回键层级、横竖屏/折叠屏形态、沉浸式、SAF
-│  ├─ MoBridge.kt      JS↔原生桥：callSync / callFire，按 http. zlib. file. dialog. tts. 等前缀分发
-│  ├─ MoNet.kt         OkHttp 封装（PROPFIND/MKCOL、过期证书降级）
-│  ├─ MoFiles.kt       私有目录文件读写 + zlib（inflate/gzip/deflate）
-│  ├─ MoTts.kt         原生 TextToSpeech
-│  └─ util/Ext.kt      Base64 小工具
-├─ app/src/main/assets/ui/       由 build 任务从 ../ui 同步过来（同一份界面）
-├─ app/src/main/assets/nodebundle.js  生成的 Node 兼容层 + 六个业务模块
-├─ nodepoly/runtime.js           最小 Node 运行时（Buffer / fs / path / zlib / http / require）
-└─ build/gen-nodebundle.js       打包脚本
 ```
 
 ## 便携模式
@@ -269,8 +141,7 @@ android/                       安卓版（Kotlin + WebView，共用上面的 sr
 - 网页嗅探靠启发式规则，不是所有站点都准；个别站点需要手动在「书源」里微调生成的规则
 - 分页模式按段落切页（不拆段），超长段落会整段换页
 - 书源密码/坚果云密码以明文存在本地 `data.json`（与原版「阅读」一致，未做加密）
-- 桌面版仅 Windows x64；安卓版要求 Android 8.0（API 26）以上
-- 安卓版目前是 debug 签名，没有上架应用商店；升级直接覆盖安装即可，卸载会清掉本地书与进度（先导出 zip）
+- 仅 Windows x64
 
 ## 免责声明
 
@@ -289,6 +160,11 @@ android/                       安卓版（Kotlin + WebView，共用上面的 sr
 | 书源自动检测 | 换源 / 失效提示 |
 | --- | --- |
 | ![书源自动检测](docs/screenshots/shot_detect.png) | ![失效与换源](docs/screenshots/shot_reader_err.png) |
+
+## 关于安卓版
+
+安卓版（竖屏功能切到屏幕底部 / 横屏沿用电脑版左侧栏 / 折叠屏开合适配）还在真机调试中，稳定后会单独发布。
+本仓库当前只含 Windows 桌面版。
 
 ## 许可证
 

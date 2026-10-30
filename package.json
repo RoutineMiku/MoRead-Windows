@@ -10,13 +10,7 @@
     "start": "electron .",
     "pack": "node build/pack.js",
     "dist": "node build/pack.js",
-    "android:bundle": "node build/gen-nodebundle.js",
-    "android:build": "node build/android-build.js",
-    "android:release": "node build/android-build.js --release",
-    "android:sim": "node test/android-sim.js",
-    "test": "node test/test-backup.js",
-    "android:ui": "node build/gen-nodebundle.js && node test/run-android-ui.js",
-    "android:check": "node test/run-android-ui.js"
+    "test": "node test/test-backup.js"
   },
   "devDependencies": {
     "electron": "^45.0.0",
