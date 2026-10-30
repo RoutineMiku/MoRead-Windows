@@ -41,11 +41,20 @@
 | --- | --- |
 | **竖屏**（手机普通握持） | 功能切换在**屏幕底部**，七个入口横排；弹窗改成底部抽屉；书架三列；阅读器底部工具栏可横向滑动 |
 | **横屏** | 沿用**电脑版的左侧功能栏**，内容区占满宽度，书源/搜索工具条横向排布 |
-| **折叠屏展开 / 平板**（最小宽度 ≥ 600dp） | 与电脑版一致的左侧宽栏 + 更宽松的栅格，正文最大宽度放宽到 820px |
+| **横屏 + 最小宽度 ≥ 600dp**（平板 / 折叠屏展开后横过来） | 左侧宽栏 + 更宽松的栅格，正文最大宽度放宽到 820px |
+| **竖屏 + 最小宽度 ≥ 600dp**（平板 / 折叠屏展开后竖着拿） | 导航**仍在底部**（竖向握持时底部比侧边顺手），栅格放宽到 4~5 列，正文居中限宽 680px |
 
-切换时机：系统 `Configuration` 变化时（含 `orientation`、`smallestScreenSize`、`screenLayout`）由原生侧把当前形态告诉页面，
-页面把它写到 `<html data-layout="portrait|landscape|wide">`，剩下的全部由 CSS 完成——**Activity 不重建**，正在读的章节不会丢。
+判定规则：**竖屏一律用底部导航，横屏一律用左侧栏**，最小宽度只影响栅格密度，不改变导航位置。
+方向由页面拿 `window.innerWidth/innerHeight` 自己判——原生推送可能丢、可能慢一拍，视口尺寸不会说谎；
+最小宽度（折叠屏折叠/展开会变）反过来只信原生。页面还会自己监听 `resize` / `orientationchange` / `visualViewport`，
+旋转后连补三次，避免拿到旋转前的旧尺寸。
+
+页面把结果写成 `<html data-layout="portrait|landscape|wide" data-sw="compact|medium|expanded">`，剩下的交给 CSS。
+**Activity 不重建**（`configChanges` 覆盖了 `orientation`、`smallestScreenSize`、`screenLayout`），正在读的章节不会丢。
 顶部/底部的安全区（刘海、手势条）通过 `env.insets` 传给页面，写成 `--sa-top` / `--sa-bottom` 等变量。
+
+**屏幕圆角（R 角）**：Android 12 以上从 `RoundedCorner` 读出四角半径，写成 `--corner-tl/tr/bl/br` 和 `--corner`；
+顶栏、竖屏底部导航、横屏侧栏、悬浮按钮、阅读区左右都会按它让开，内容不会被圆角切掉。
 
 ### 安卓上的操作逻辑
 

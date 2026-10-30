@@ -148,6 +148,7 @@ class MoBridge(private val act: MainActivity) {
         }
         "layout" -> act.layoutInfo()
         "insets" -> act.insetInfo()
+        "corners" -> act.cornerInfo()
         else -> throw IllegalArgumentException("未知环境查询: $op")
     }
 

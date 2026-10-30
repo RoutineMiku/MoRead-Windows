@@ -495,7 +495,28 @@ input[type=range]{accent-color:var(--accent);}
 html[data-layout]{
   --sa-top:0px;--sa-bottom:0px;--sa-left:0px;--sa-right:0px;
   --appbar:52px;
+  /* 屏幕圆角半径（原生写入，拿不到就是 0）：用来把内容从四角挪开，
+     否则底部导航最外侧的按钮、顶栏两角会被屏幕 R 角切掉 */
+  --corner:0px;--corner-tl:0px;--corner-tr:0px;--corner-bl:0px;--corner-br:0px;
 }
+
+/* ---- 屏幕圆角避让：贴边的那一圈控件都要让开 ---- */
+/* 竖屏：底部导航左右两角 */
+html[data-layout="portrait"] .rail{
+  padding-left:max(2px, calc(var(--corner-bl) * .7));
+  padding-right:max(2px, calc(var(--corner-br) * .7));
+}
+/* 横屏 / 展开态：左侧栏上下两角 */
+html[data-layout="landscape"] .rail,
+html[data-layout="wide"] .rail{
+  padding-top:max(10px, calc(var(--corner-tl) * .6));
+}
+/* 竖屏底部导航七个入口：让开圆角后仍要一排放得下 */
+html[data-layout="portrait"] .rail-btn{min-width:40px;}
+/* 悬浮按钮、吐司也别压在圆角上 */
+html[data-layout="landscape"] .toast,
+html[data-layout="wide"] .toast{bottom:calc(24px + var(--sa-bottom));}
+html[data-layout] .rg-tools{padding-right:max(10px, calc(var(--corner-br) * .6));}
 html[data-layout] body{
   -webkit-tap-highlight-color:rgba(43,108,224,.12);
   /* 别让 WebView 自作主张缩放文字，否则横竖屏切换时字号会变 */
@@ -516,7 +537,9 @@ html[data-layout] .rb-btn,
 html[data-layout] .card{touch-action:manipulation;}
 /* 顶部应用栏：给状态栏留位，去掉桌面版的拖拽语义 */
 html[data-layout] .titlebar{
-  height:var(--appbar);flex:0 0 var(--appbar);padding:0 6px 0 14px;
+  height:var(--appbar);flex:0 0 var(--appbar);
+  /* 左右让开屏幕圆角，不然品牌区和按钮会被 R 角切掉 */
+  padding:0 max(8px, var(--corner-tr)) 0 max(14px, var(--corner-tl));
   background:rgba(255,255,255,.9);border-bottom:1px solid rgba(0,0,0,.06);
   -webkit-app-region:no-drag;
 }
@@ -623,6 +646,32 @@ html[data-layout] .tb-group::-webkit-scrollbar{display:none;}
 
 /* 横屏时右下角的悬浮操作留出导航栏空间 */
 html[data-layout] .rg-tools{padding-bottom:calc(10px + var(--sa-bottom));}
+
+/* ---------------- 竖屏大屏（平板 / 折叠屏展开后竖向握持） ----------------
+ * 导航仍在底部——竖向握持时底部比侧边顺手；只是把栅格放宽、正文居中限宽，
+ * 免得 800dp 宽的屏幕上还挤着三列卡片、一行字拉到一百多个字。 */
+html[data-layout="portrait"][data-sw="medium"] .grid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr));}
+html[data-layout="portrait"][data-sw="expanded"] .grid{grid-template-columns:repeat(auto-fill,minmax(124px,1fr));}
+/* 七个入口在大屏上别被拉得太宽，居中收一收 */
+html[data-layout="portrait"][data-sw="medium"] .rail-btn,
+html[data-layout="portrait"][data-sw="expanded"] .rail-btn{max-width:104px;}
+html[data-layout="portrait"][data-sw="medium"] .rail,
+html[data-layout="portrait"][data-sw="expanded"] .rail{justify-content:center;}
+html[data-layout="portrait"][data-sw="expanded"] .page{max-width:680px;margin-left:auto;margin-right:auto;}
+
+/* 阅读区左右也让开圆角（保留各形态原本的舒适边距，只在圆角更大时才加宽） */
+html[data-layout="portrait"] .page{
+  padding-left:max(18px, calc(var(--corner-bl) * .5));
+  padding-right:max(18px, calc(var(--corner-br) * .5));
+}
+html[data-layout="landscape"] .page{
+  padding-left:max(46px, calc(var(--corner) * .5));
+  padding-right:max(46px, calc(var(--corner) * .5));
+}
+html[data-layout="wide"] .page{
+  padding-left:max(40px, calc(var(--corner) * .5));
+  padding-right:max(40px, calc(var(--corner) * .5));
+}
 
 /* ==================================================================
  * 兜底：万一原生侧没能把形态推给页面（初始化异常、WebView 过旧、桥接失败……）

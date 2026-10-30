@@ -1143,12 +1143,11 @@
       }
       return false;
     },
-    /** 横竖屏 / 折叠状态变化 */
+    /** 横竖屏 / 折叠状态变化：原生推来的只是参考，方向最终以视口宽高为准 */
     onLayout(mode, info) {
-      window.__moreadLayout = mode;
-      if (info) window.__moreadInsets = info;
-      applyLayout(mode, info);
-      window.dispatchEvent(new CustomEvent('moread:layout', { detail: { mode, info } }));
+      absorbNativeLayout(mode, info);
+      const m = syncLayout();
+      window.dispatchEvent(new CustomEvent('moread:layout', { detail: { mode: m, info: info || null } }));
     },
     /** 外部用其他应用打开 txt / epub / 备份时送进来 */
     onOpenFile(payload) {
@@ -1159,27 +1158,119 @@
   };
 
   /* ==================================================================
-   * 10. 横竖屏 / 折叠屏布局：给 body 打标记，剩下的交给 CSS
-   *     portrait 竖屏（底部导航）｜ landscape 横屏（左侧栏）｜ wide 展开态（左侧宽栏）
+   * 10. 横竖屏 / 折叠屏布局
+   *
+   * 关键：方向以「页面自己看到的视口宽高」为准，原生推送只当参考。
+   * 原生那一路可能丢（页面还没就绪时 evaluateJavascript 白送）、可能慢一拍，
+   * 也可能与 WebView 实际视口不一致；而 window.innerWidth/innerHeight 不会说谎。
+   * 最小宽度（sw）反过来只能信原生——折叠屏折叠/展开会变，页面自己算不出来。
+   *
+   *   portrait  竖屏：底部导航
+   *   landscape 横屏：左侧栏
+   *   wide      横屏且最小宽度 ≥600dp（平板 / 折叠屏展开）：左侧宽栏
    * ================================================================== */
-  function applyLayout(mode, info) {
-    // 先保证形态标记一定在（安全区取不到也不能把布局搞没）
-    document.documentElement.setAttribute('data-layout', mode || 'portrait');
-    document.documentElement.classList.add('is-android');
-    let ins = (info && info.insets) || null;
-    if (!ins) {
-      try { ins = NB.call('env.insets'); } catch (e) { ins = null; }
-    }
-    ins = ins || {};
-    document.documentElement.style.setProperty('--sa-top', (ins.top || 0) + 'px');
-    document.documentElement.style.setProperty('--sa-bottom', (ins.bottom || 0) + 'px');
-    document.documentElement.style.setProperty('--sa-left', (ins.left || 0) + 'px');
-    document.documentElement.style.setProperty('--sa-right', (ins.right || 0) + 'px');
-    // 首次进来也主动问一次形态，避免只按竖屏渲染
-    try {
-      const l = NB.call('env.layout');
-      if (l && l.mode) document.documentElement.setAttribute('data-layout', l.mode);
-    } catch (e) { /* keep */ }
+  const nativeInfo = { mode: null, sw: 0, bucket: '', insets: null, corners: null };
+
+  function absorbNativeLayout(mode, info) {
+    if (mode) nativeInfo.mode = mode;
+    if (!info) return;
+    if (info.sw) nativeInfo.sw = info.sw;
+    if (info.bucket) nativeInfo.bucket = info.bucket;
+    if (info.insets) nativeInfo.insets = info.insets;
+    if (info.corners) nativeInfo.corners = info.corners;
   }
-  try { applyLayout('portrait', null); } catch (e) { markAndroid(); }
+
+  function viewportSize() {
+    const de = document.documentElement;
+    return {
+      w: window.innerWidth || (de && de.clientWidth) || 0,
+      h: window.innerHeight || (de && de.clientHeight) || 0
+    };
+  }
+
+  function bucketOf(sw) {
+    if (sw >= 840) return 'expanded';
+    if (sw >= 600) return 'medium';
+    return 'compact';
+  }
+
+  function detectMode() {
+    const v = viewportSize();
+    if (!v.w || !v.h) return nativeInfo.mode || 'portrait';
+    const sw = nativeInfo.sw > 0 ? nativeInfo.sw : Math.min(v.w, v.h);
+    // 宽 > 高 就是横屏，不再看原生给的 orientation（它跟视口可能不一致）
+    if (v.w > v.h) return sw >= 600 ? 'wide' : 'landscape';
+    return 'portrait';
+  }
+
+  function applyInsets(ins) {
+    const de = document.documentElement;
+    ins = ins || {};
+    de.style.setProperty('--sa-top', (ins.top || 0) + 'px');
+    de.style.setProperty('--sa-bottom', (ins.bottom || 0) + 'px');
+    de.style.setProperty('--sa-left', (ins.left || 0) + 'px');
+    de.style.setProperty('--sa-right', (ins.right || 0) + 'px');
+  }
+
+  /** 屏幕圆角半径：拿不到当 0（直角屏），拿到就给 CSS 用来避开四角 */
+  function applyCorners(c) {
+    const de = document.documentElement;
+    c = c || {};
+    const tl = c.tl || 0, tr = c.tr || 0, bl = c.bl || 0, br = c.br || 0;
+    de.style.setProperty('--corner-tl', tl + 'px');
+    de.style.setProperty('--corner-tr', tr + 'px');
+    de.style.setProperty('--corner-bl', bl + 'px');
+    de.style.setProperty('--corner-br', br + 'px');
+    de.style.setProperty('--corner', Math.max(tl, tr, bl, br) + 'px');
+  }
+
+  function syncLayout() {
+    const de = document.documentElement;
+    de.classList.add('is-android');
+    const mode = detectMode();
+    de.setAttribute('data-layout', mode);
+    const v = viewportSize();
+    const sw = nativeInfo.sw > 0 ? nativeInfo.sw : Math.min(v.w || 360, v.h || 640);
+    de.setAttribute('data-sw', nativeInfo.bucket || bucketOf(sw));
+    window.__moreadLayout = mode;
+    if (!nativeInfo.insets) { try { nativeInfo.insets = NB.call('env.insets'); } catch (e) { } }
+    applyInsets(nativeInfo.insets);
+    if (!nativeInfo.corners) { try { nativeInfo.corners = NB.call('env.corners'); } catch (e) { } }
+    applyCorners(nativeInfo.corners);
+    return mode;
+  }
+
+  /* 自己盯着视口：旋转、折叠屏开合、分屏、键盘都会让尺寸变 */
+  function watchViewport() {
+    let t = null;
+    const run = () => {
+      if (t) { clearTimeout(t); t = null; }
+      t = setTimeout(syncLayout, 60);
+      // 旋转瞬间视口尺寸可能还没更新，补两枪
+      setTimeout(syncLayout, 220);
+      setTimeout(syncLayout, 600);
+    };
+    window.addEventListener('resize', run);
+    window.addEventListener('orientationchange', run);
+    if (window.visualViewport && window.visualViewport.addEventListener) {
+      window.visualViewport.addEventListener('resize', run);
+    }
+    try {
+      const mq = window.matchMedia('(orientation: portrait)');
+      if (mq.addEventListener) mq.addEventListener('change', run);
+      else if (mq.addListener) mq.addListener(run);
+    } catch (e) { /* 老 WebView 没有 */ }
+  }
+
+  // 兼容旧名字
+  function applyLayout(mode, info) { absorbNativeLayout(mode, info); return syncLayout(); }
+
+  try { syncLayout(); } catch (e) { markAndroid(); }
+  try { watchViewport(); } catch (e) { }
+  // 首屏原生那边的推送可能还没到（或已丢失），主动问一次拿 sw / insets / 圆角
+  try {
+    const l = NB.call('env.layout');
+    absorbNativeLayout(l && l.mode, l);
+    syncLayout();
+  } catch (e) { /* 保持上面算出来的结果 */ }
 })();

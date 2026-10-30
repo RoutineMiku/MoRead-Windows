@@ -39,8 +39,10 @@ function callSync(name, json) {
   const abs = p => (path.isAbsolute(p) ? p : path.join(DATA, p));
 
   if (name === 'env.info') return R({ app: 'moread', platform: 'android', version: '2.1.0', paths: { root: DATA } });
-  if (name === 'env.layout') return R({ mode: 'portrait', sw: 360 });
+  if (name === 'env.layout') return R({ mode: 'portrait', sw: 360, bucket: 'compact' });
   if (name === 'env.insets') return R({ top: 24, bottom: 16, left: 0, right: 0 });
+  // 屏幕圆角（模拟一台四角 32px 圆角的手机）
+  if (name === 'env.corners') return R({ tl: 32, tr: 32, bl: 32, br: 32 });
 
   if (name.startsWith('file.')) {
     switch (name.slice(5)) {
@@ -175,6 +177,8 @@ function httpRequestSync(a) {
 function makeSandbox() {
   const win = {
     addEventListener() { }, removeEventListener() { }, dispatchEvent() { },
+    // 视口尺寸：形态判定以它为准（原生推送只当参考），测试里会改这两个值模拟旋转 / 折叠屏开合
+    innerWidth: 393, innerHeight: 873,
     setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
     TextEncoder, TextDecoder, URL, URLSearchParams, CustomEvent, console, Promise,
     navigator: { userAgent: 'Mozilla/5.0 Chrome/126 MoReadAndroid/2.1.0' },
@@ -205,6 +209,7 @@ function makeSandbox() {
   /* 真实记录状态的 DOM 桩：用来验证「布局标记一定打得上、桌面窗口按钮一定被摘掉」 */
   const domAttrs = {};
   const domClasses = new Set();
+  const domVars = {};
   const removed = [];
   const mkEl = name => ({
     __el: name,
@@ -220,14 +225,15 @@ function makeSandbox() {
   let winbtns = mkEl('.winbtns');
   let dropzone = mkEl('.dropzone');
   const doc = {
-    __attrs: domAttrs, __classes: domClasses, __removed: removed,
+    __attrs: domAttrs, __classes: domClasses, __removed: removed, __vars: domVars,
     readyState: 'complete',
     body: { classList: { add() { }, remove() { }, toggle() { }, contains: () => false } },
     documentElement: {
       setAttribute(k, v) { domAttrs[k] = String(v); },
       getAttribute(k) { return k in domAttrs ? domAttrs[k] : null; },
       classList: { add(c) { domClasses.add(c); }, remove(c) { domClasses.delete(c); }, contains: c => domClasses.has(c) },
-      style: { setProperty() { } }, addEventListener() { }, dispatchEvent() { }
+      style: { setProperty(k, v) { domVars[k] = String(v); } },
+      addEventListener() { }, dispatchEvent() { }
     },
     addEventListener() { }, dispatchEvent() { },
     querySelector(sel) {
@@ -279,6 +285,36 @@ async function run() {
   ok('已标记 is-android', D.__classes.has('is-android'));
   ok('桌面窗口按钮已摘除', D.__removed.includes('.winbtns'), D.__removed.join(',') || '(无)');
   ok('桌面拖放区已摘除', D.__removed.includes('.dropzone'));
+  ok('安全区已写入 CSS 变量', !!D.__vars['--sa-top'], D.__vars['--sa-top']);
+  ok('屏幕圆角已写入 CSS 变量', D.__vars['--corner'] === '32px', D.__vars['--corner']);
+
+  /* ---- 0b. 横竖屏 / 折叠屏形态判定 ----
+     方向必须以视口宽高为准：原生推送可能丢、可能慢、也可能和视口不一致 */
+  const mode = () => D.__attrs['data-layout'];
+  const sw = () => D.__attrs['data-sw'];
+  const rotate = (w, h, info) => { win.innerWidth = w; win.innerHeight = h; win.MoApp.onLayout(info.mode, info); };
+
+  rotate(393, 873, { mode: 'portrait', sw: 393, bucket: 'compact' });
+  ok('手机竖屏 → portrait（底部导航）', mode() === 'portrait', mode());
+  ok('手机竖屏 → 档位 compact', sw() === 'compact', sw());
+
+  rotate(393, 873, { mode: 'landscape', sw: 393, bucket: 'compact' });
+  ok('原生误报横屏时仍按视口判竖屏', mode() === 'portrait', mode());
+
+  rotate(873, 393, { mode: 'landscape', sw: 393, bucket: 'compact' });
+  ok('手机横屏 → landscape（左侧栏）', mode() === 'landscape', mode());
+
+  rotate(673, 841, { mode: 'portrait', sw: 673, bucket: 'medium' });
+  ok('折叠屏展开竖握 → portrait + medium', mode() === 'portrait' && sw() === 'medium', mode() + '/' + sw());
+
+  rotate(841, 673, { mode: 'landscape', sw: 673, bucket: 'medium' });
+  ok('折叠屏展开横屏 → wide（左侧宽栏）', mode() === 'wide', mode());
+
+  rotate(1280, 800, { mode: 'landscape', sw: 1280, bucket: 'expanded' });
+  ok('平板横屏 → wide + expanded', mode() === 'wide' && sw() === 'expanded', mode() + '/' + sw());
+
+  rotate(800, 1280, { mode: 'portrait', sw: 800, bucket: 'expanded' });
+  ok('平板竖屏 → portrait（底部导航）+ expanded', mode() === 'portrait' && sw() === 'expanded', mode() + '/' + sw());
 
   const mo = win.mo;
 

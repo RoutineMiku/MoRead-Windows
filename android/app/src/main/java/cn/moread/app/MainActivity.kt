@@ -10,6 +10,8 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
@@ -48,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     private var lastInsets = JSONObject()
     private var pendingExternal: JSONObject? = null
     private var backPressedAt = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     /* ---------- 文件选择的结果回传 ---------- */
     @Volatile private var pickSink: ((List<Uri>) -> Unit)? = null
@@ -273,28 +276,67 @@ class MainActivity : AppCompatActivity() {
     /* ---------- 横竖屏 / 折叠屏 ---------- */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        pushLayout()
+        // 用刚传进来的 configuration：折叠屏开合时 resources 可能还没刷成新的
+        pushLayout(newConfig)
     }
 
-    private fun pushLayout() {
-        val info = layoutInfo()
+    private fun pushLayout(cfg: Configuration? = null) {
+        val info = layoutInfo(cfg)
         val mode = info.optString("mode")
-        bridge.emitToJs("if(window.MoApp&&window.MoApp.onLayout){window.MoApp.onLayout('$mode',$info)}")
+        val js = "if(window.MoApp&&window.MoApp.onLayout){window.MoApp.onLayout('$mode',$info)}"
+        bridge.emitToJs(js)
+        // WebView 视口尺寸的更新比 configuration 慢一拍，补两枪确保页面拿到的是最终尺寸
+        mainHandler.postDelayed({ bridge.emitToJs(js) }, 150)
+        mainHandler.postDelayed({ bridge.emitToJs(js) }, 450)
     }
 
-    fun layoutInfo(): JSONObject {
-        val cfg = resources.configuration
+    /**
+     * 形态判定：
+     *  - 竖屏一律 portrait（底部导航）——竖向握持时底部比侧边顺手
+     *  - 横屏按最小宽度分 landscape（窄）/ wide（≥600dp，左栏加宽）
+     * sw 档位（compact/medium/expanded）另外给页面用来调栅格密度
+     */
+    fun layoutInfo(cfgIn: Configuration? = null): JSONObject {
+        val cfg = cfgIn ?: resources.configuration
         val sw = cfg.smallestScreenWidthDp
-        val landscape = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val wDp = cfg.screenWidthDp
+        val hDp = cfg.screenHeightDp
+        val landscape = wDp > hDp || cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val mode = when {
+            landscape && sw >= 600 -> "wide"
+            landscape -> "landscape"
+            else -> "portrait"
+        }
         val metrics = resources.displayMetrics
-        val mode = if (sw >= 600) "wide" else if (landscape) "landscape" else "portrait"
         return JSONObject()
             .put("mode", mode)
             .put("sw", sw)
+            .put("bucket", if (sw >= 840) "expanded" else if (sw >= 600) "medium" else "compact")
             .put("landscape", landscape)
-            .put("widthDp", (metrics.widthPixels / metrics.density).toInt())
-            .put("heightDp", (metrics.heightPixels / metrics.density).toInt())
+            .put("widthDp", wDp)
+            .put("heightDp", hDp)
+            .put("pxWidth", metrics.widthPixels)
+            .put("pxHeight", metrics.heightPixels)
             .put("density", metrics.density.toDouble())
+            .put("insets", insetInfo())
+            .put("corners", cornerInfo())
+    }
+
+    /** 屏幕圆角半径（Android 12+ 才拿得到；拿不到就当 0，页面按直角处理） */
+    @SuppressLint("NewApi")
+    fun cornerInfo(): JSONObject {
+        val out = JSONObject().put("tl", 0).put("tr", 0).put("bl", 0).put("br", 0)
+        if (Build.VERSION.SDK_INT < 31) return out
+        val wi = ViewCompat.getRootWindowInsets(window.decorView)?.toWindowInsets() ?: return out
+        fun radius(pos: Int): Int = runCatching {
+            val c = wi.getRoundedCorner(pos) ?: return@runCatching 0
+            c.radius
+        }.getOrDefault(0)
+        out.put("tl", radius(android.view.RoundedCorner.POSITION_TOP_LEFT))
+        out.put("tr", radius(android.view.RoundedCorner.POSITION_TOP_RIGHT))
+        out.put("bl", radius(android.view.RoundedCorner.POSITION_BOTTOM_LEFT))
+        out.put("br", radius(android.view.RoundedCorner.POSITION_BOTTOM_RIGHT))
+        return out
     }
 
     fun insetInfo(): JSONObject = lastInsets
