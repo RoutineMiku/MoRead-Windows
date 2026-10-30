@@ -34,8 +34,10 @@ if (!fs.existsSync(RUNTIME)) {
 }
 fs.mkdirSync(OUT, { recursive: true });
 
-/* 0. 清掉旧产物（中文路径交给 PowerShell，避免编码问题） */
-ps(`foreach ($p in @('${FINAL}', '${FINAL}.zip', '${WORK}', '${WORK}.zip')) { if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force } }`);
+/* 0. 清掉旧产物（Node 原生，前提是无 NODE_OPTIONS 中文路径 shim，干净环境下 rename/rm 中文可靠） */
+for (const p of [FINAL, FINAL + '.zip', WORK, WORK + '.zip']) {
+  try { fs.rmSync(p, { recursive: true, force: true }); } catch (e) {}
+}
 
 /* 1. 复制运行时（英文目标路径，逐项复制更稳） */
 console.log('运行时：' + RUNTIME);
@@ -70,19 +72,37 @@ for (const f of ['icon.ico', 'tray.png']) {
 console.log('收尾…');
 execFileSync(process.execPath, [path.join(__dirname, 'finish.js'), ASCII], { stdio: 'inherit' });
 
-/* 5. 英文目录 → 中文名，exe 也改成中文名 */
-ps(`Rename-Item -LiteralPath '${WORK}' -NewName '${CN}'`);
-ps(`if (Test-Path -LiteralPath '${FINAL}\\moread.exe') { Rename-Item -LiteralPath '${FINAL}\\moread.exe' -NewName '墨读.exe' }`);
+/* 5. 英文目录 → 中文名，exe 也改成中文名（Node 原生 rename，别走 PowerShell 命令行传中文） */
+fs.renameSync(WORK, FINAL);
+const exeA = path.join(FINAL, 'moread.exe');
+if (fs.existsSync(exeA)) fs.renameSync(exeA, path.join(FINAL, '墨读.exe'));
 if (!fs.existsSync(path.join(FINAL, '墨读.exe'))) throw new Error('exe 改名失败');
 
-/* 6. 用中文目录名重新压 zip（finish 里那份是英文目录名压的） */
+/* 6. 用中文目录名压 zip。中文路径不进命令行，写带 BOM 的 ps1 让 PowerShell 按文件读取 */
 for (const f of [ASCII + '.zip', CN + '.zip']) {
   const p = path.join(OUT, f);
-  if (fs.existsSync(p)) fs.rmSync(p, { force: true });
+  try { fs.rmSync(p, { force: true }); } catch (e) {}
 }
 console.log('压缩 zip…');
-ps(`Compress-Archive -LiteralPath '${FINAL}' -DestinationPath '${path.join(OUT, CN + '.zip')}' -CompressionLevel Optimal`);
+const zipScript = path.join(OUT, '_pack-zip.ps1');
+fs.writeFileSync(zipScript, '﻿' + [
+  "$ErrorActionPreference = 'Stop'",
+  `Compress-Archive -LiteralPath '${FINAL}' -DestinationPath '${path.join(OUT, CN + '.zip')}' -CompressionLevel Optimal`
+].join('\r\n'), 'utf8');
+try {
+  execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', zipScript], { stdio: 'inherit' });
+} finally {
+  try { fs.rmSync(zipScript, { force: true }); } catch (e) {}
+}
 
-const size = Number(ps(`(Get-ChildItem -LiteralPath '${FINAL}' -Recurse | Measure-Object Length -Sum).Sum`)) / 1048576;
+/* 目录体积（Node 递归，不走 PowerShell） */
+let size = 0;
+(function walk(p) {
+  for (const f of fs.readdirSync(p, { withFileTypes: true })) {
+    const q = path.join(p, f.name);
+    if (f.isDirectory()) walk(q); else size += fs.statSync(q).size;
+  }
+})(FINAL);
+size /= 1048576;
 const zipSize = fs.existsSync(path.join(OUT, CN + '.zip')) ? fs.statSync(path.join(OUT, CN + '.zip')).size / 1048576 : 0;
 console.log(`完成：dist/${CN}（${size.toFixed(0)}MB）、dist/${CN}.zip（${zipSize.toFixed(0)}MB）`);

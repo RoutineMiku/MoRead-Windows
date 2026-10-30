@@ -92,6 +92,8 @@ function createWindow() {
   });
   win.on('maximize', () => win.webContents.send('win:state', { maximized: true }));
   win.on('unmaximize', () => win.webContents.send('win:state', { maximized: false }));
+  win.on('enter-full-screen', () => win.webContents.send('win:state', { fullscreen: true }));
+  win.on('leave-full-screen', () => win.webContents.send('win:state', { fullscreen: false }));
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -245,6 +247,14 @@ function registerIpc() {
   });
   ipcMain.handle('win:close', () => win && win.close());
   ipcMain.handle('win:isMax', () => !!(win && win.isMaximized()));
+  ipcMain.handle('win:fullscreen', () => {
+    if (!win) return false;
+    /* setFullScreen 是异步生效的，立即回读会拿到旧值，这里返回目标值 */
+    const next = !win.isFullScreen();
+    win.setFullScreen(next);
+    return next;
+  });
+  ipcMain.handle('win:isFull', () => !!(win && win.isFullScreen()));
 
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),
@@ -279,7 +289,9 @@ function registerIpc() {
         charset: opts.charset,
         method: opts.method || 'GET',
         body: opts.body,
-        headers: opts.headers
+        headers: opts.headers,
+        /* 书源批量检测时用短超时，避免个别卡死的源拖慢整轮 */
+        timeout: opts.timeout || 18000
       });
       // 正文页通常不需要完整 HTML 之外的资源，直接回文本
       return { ok: true, status: r.status, url: r.url, charset: r.charset, text: r.text, ms: r.ms };

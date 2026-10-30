@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('mo', {
     maximize: () => invoke('win:maximize'),
     close: () => invoke('win:close'),
     isMax: () => invoke('win:isMax'),
+    fullscreen: () => invoke('win:fullscreen'),
+    isFull: () => invoke('win:isFull'),
     onState: cb => ipcRenderer.on('win:state', (_e, s) => cb(s))
   },
   info: () => invoke('app:info'),

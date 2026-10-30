@@ -254,9 +254,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
 .reader[data-theme="sepia"]{--r-bg:#f6efe1;--r-text:#3a3226;--r-dim:#9a8f79;}
 .reader[data-theme="night"]{--r-bg:#14171b;--r-text:#c2c8d0;--r-dim:#6d7681;}
 .reader[data-theme="green"]{--r-bg:#e6efe4;--r-text:#2b3a2c;--r-dim:#7f8f7f;}
-.reader-top{height:50px;flex:0 0 50px;display:flex;align-items:center;gap:12px;padding:0 16px;
+/* 无边框窗口顶部约 6~8px 是系统缩放热区，会把点击吞掉：留出安全边距并显式禁止拖拽 */
+.reader-top{height:54px;flex:0 0 54px;display:flex;align-items:center;gap:12px;padding:6px 16px 0;
+  -webkit-app-region:no-drag;
   background:var(--r-bg);border-bottom:1px solid rgba(0,0,0,.055);color:var(--r-text);}
-.rback{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--r-dim);padding:6px 9px;border-radius:8px;}
+body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
+.rback{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--r-dim);
+  padding:8px 12px;border-radius:8px;min-height:34px;-webkit-app-region:no-drag;cursor:pointer;}
 .rback:hover{background:rgba(0,0,0,.05);color:var(--r-text);}
 .rback svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;}
 .rtitle{font-size:13px;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:50%;}
@@ -457,6 +461,26 @@ input[type=range]{accent-color:var(--accent);}
 .tb-count{font-size:12px;color:var(--faint);}
 .pager{display:flex;align-items:center;justify-content:center;gap:12px;padding:18px 0 34px;font-size:12.5px;color:#6b7280;}
 .chip.warn{background:#fdf1e7;border-color:#f6ddc6;color:#a8621c;}
+
+/* ---------- 书源质量 ---------- */
+.chip.q-great{background:#e8f6ec;border-color:#c6e8d1;color:#1a7a41;font-weight:600;}
+.chip.q-ok{background:#eef4fd;border-color:#d8e5fb;color:#2a5bb8;}
+.chip.q-poor{background:#fdf6e7;border-color:#f2e3c2;color:#8a6413;}
+.chip.q-dead{background:#fdeeee;border-color:#f4d4d4;color:#a63b3b;}
+.field input[type=range]{height:auto;padding:0;background:none;border:none;box-shadow:none;}
+.field input[type=range]:focus{box-shadow:none;border:none;background:none;}
+.field label.cb{display:flex;align-items:center;gap:8px;font-weight:400;color:var(--text);cursor:pointer;}
+.field label.cb input{width:15px;height:15px;}
+
+/* ---------- 检测进度 ---------- */
+.dt-bar{height:7px;border-radius:6px;background:#eef1f6;overflow:hidden;margin:14px 0 8px;}
+.dt-bar i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,#4b86ea,#2f5fd0);transition:width .25s;}
+.dt-line{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;color:var(--muted);
+  min-height:19px;word-break:break-all;}
+.dt-tags{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px;}
+.dt-done{margin-top:14px;}
+.dt-sum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+.dt-sum .chip{font-size:12.5px;padding:4px 10px;}
 .btn[disabled]{opacity:.45;cursor:default;}
 .search-note{font-size:12px;color:#8a919c;line-height:1.6;background:#f7f9fc;border:1px solid #e8edf5;
   border-radius:9px;padding:8px 11px;margin:6px 0 10px;}

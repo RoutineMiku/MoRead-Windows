@@ -29,6 +29,11 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = p => (p || 'X') + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  /* 网络请求取消不了，但不必一直等：超时就放弃这个源，继续下一个 */
+  const withTimeout = (p, ms) => Promise.race([
+    Promise.resolve(p),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('超时')), ms))
+  ]);
 
   function gradOf(name) {
     let h = 0;
@@ -464,7 +469,15 @@
   function pickSearchSources(all, n) {
     if (all.length <= n) return all;
     const used = new Set(S.state.books.map(b => b.sourceId).filter(Boolean));
-    const tier = s => (used.has(s.id) ? 0 : (s.lastCount > 0 ? 1 : (s.lastError ? 3 : 2)));
+    /* 检测结果优先：优质 > 有效 > 书架用过 > 未检测 > 较差 > 无用 */
+    const tier = s => {
+      if (s.quality === 'great') return 0;
+      if (s.quality === 'ok') return 1;
+      if (used.has(s.id)) return 2;
+      if (s.quality === 'poor') return 4;
+      if (s.quality === 'dead') return 5;
+      return 3;
+    };
     const idx = new Map(all.map((s, i) => [s, i]));
     return all.slice()
       .sort((a, b) => (tier(a) - tier(b)) || (idx.get(a) - idx.get(b)))
@@ -525,7 +538,7 @@
         if (seq !== searchSeq) return;
         try {
           const t0 = performance.now();
-          const r = await Engine.search(mo.net, s, kw);
+          const r = await withTimeout(Engine.search(mo.net, s, kw), 9000);
           const ms = Math.round(performance.now() - t0);
           s.lastTest = Date.now(); s.lastLatency = ms; s.lastCount = r.length; s.lastError = '';
           if (r.length) hitSrc++;
@@ -885,6 +898,8 @@
 
   const SRC_PAGE_SIZE = 50;
 
+  const Q_NAME = { great: '优质', ok: '有效', poor: '较差', dead: '无用' };
+
   function srcFiltered() {
     const q = (S.srcQ || '').trim().toLowerCase();
     return S.state.sources.filter(s => {
@@ -892,6 +907,10 @@
       if (S.srcE === 'on' && !s.enabled) return false;
       if (S.srcE === 'off' && s.enabled) return false;
       if (S.srcE === 'err' && !s.lastError) return false;
+      if (S.srcQL && S.srcQL !== 'all') {
+        const q = s.quality || 'none';
+        if (S.srcQL === 'none' ? !!s.quality : q !== S.srcQL) return false;
+      }
       if (q) {
         const hay = (s.name + ' ' + (s.url || '') + ' ' + (s.group || '')).toLowerCase();
         if (!hay.includes(q)) return false;
@@ -906,6 +925,8 @@
     const onCount = st.sources.filter(s => s.enabled).length;
     const groups = [...new Set(st.sources.map(s => s.group || '未分组'))].sort();
     const list = srcFiltered();
+    const qc = { done: 0, great: 0, ok: 0, poor: 0, dead: 0 };
+    for (const s of st.sources) if (s.quality) { qc.done++; if (qc[s.quality] != null) qc[s.quality]++; }
     const pages = Math.max(1, Math.ceil(list.length / SRC_PAGE_SIZE));
     S.srcPage = clamp(S.srcPage || 0, 0, pages - 1);
     const view = list.slice(S.srcPage * SRC_PAGE_SIZE, (S.srcPage + 1) * SRC_PAGE_SIZE);
@@ -913,7 +934,7 @@
     v.innerHTML = `
       <div class="page-head">
         <h1>书源</h1>
-        <span class="sub">${st.sources.length} 个 · ${onCount} 个已启用</span>
+        <span class="sub">${st.sources.length} 个 · ${onCount} 个已启用${qc.done ? ` · 已检测 ${qc.done}：优质 ${qc.great} / 有效 ${qc.ok} / 较差 ${qc.poor} / 无用 ${qc.dead}` : ' · 未检测'}</span>
         <div class="head-tools">
           <button class="btn" id="src-import">导入 JSON</button>
           <button class="btn" id="src-paste">粘贴导入</button>
@@ -937,8 +958,17 @@
           <option value="off" ${S.srcE === 'off' ? 'selected' : ''}>已停用</option>
           <option value="err" ${S.srcE === 'err' ? 'selected' : ''}>上次失败</option>
         </select>
+        <select class="tb-select" id="src-quality">
+          <option value="all">全部质量</option>
+          <option value="great" ${S.srcQL === 'great' ? 'selected' : ''}>优质</option>
+          <option value="ok" ${S.srcQL === 'ok' ? 'selected' : ''}>有效</option>
+          <option value="poor" ${S.srcQL === 'poor' ? 'selected' : ''}>较差</option>
+          <option value="dead" ${S.srcQL === 'dead' ? 'selected' : ''}>无用</option>
+          <option value="none" ${S.srcQL === 'none' ? 'selected' : ''}>未检测</option>
+        </select>
         <div class="tb-spacer"></div>
         <span class="tb-count">筛选出 ${list.length} 个</span>
+        <button class="btn sm" id="src-detect">自动检测</button>
         <button class="btn sm" id="src-bulk-on">启用这些</button>
         <button class="btn sm" id="src-bulk-off">停用这些</button>
       </div>
@@ -949,6 +979,7 @@
             <div class="body">
               <div class="t">${esc(s.name)}
                 <span class="dot ${s.lastError ? 'err' : (s.lastLatency ? 'ok' : '')}"></span>
+                ${s.quality ? `<span class="chip q-${s.quality}" title="${esc(s.qNote || '')}">${esc(Q_NAME[s.quality] || s.quality)}</span>` : ''}
                 <span class="chip">${esc(s.group || '未分组')}</span>
                 ${s.lastLatency ? `<span class="chip">${s.lastLatency}ms</span>` : ''}
                 ${s.lastError ? `<span class="chip warn" title="${esc(s.lastError)}">失败</span>` : ''}
@@ -993,6 +1024,10 @@
     if (gsel) gsel.onchange = () => { S.srcG = gsel.value; S.srcPage = 0; renderSources(); };
     const esel = $('#src-enabled');
     if (esel) esel.onchange = () => { S.srcE = esel.value; S.srcPage = 0; renderSources(); };
+    const qsel = $('#src-quality');
+    if (qsel) qsel.onchange = () => { S.srcQL = qsel.value; S.srcPage = 0; renderSources(); };
+    const dbtn = $('#src-detect');
+    if (dbtn) dbtn.onclick = () => openDetectDialog();
     const prev = $('#src-prev'), next = $('#src-next');
     if (prev) prev.onclick = () => { S.srcPage--; renderSources(); };
     if (next) next.onclick = () => { S.srcPage++; renderSources(); };
@@ -1026,7 +1061,7 @@
       el.disabled = true; el.textContent = '测试中';
       try {
         const t0 = performance.now();
-        const r = await Engine.search(mo.net, s, '我的');
+        const r = await withTimeout(Engine.search(mo.net, s, '我的'), 10000);
         s.lastTest = Date.now(); s.lastLatency = Math.round(performance.now() - t0); s.lastCount = r.length; s.lastError = '';
         toast(r.length ? `「${s.name}」可用 · 搜到 ${r.length} 条` : `「${s.name}」能连通，但没搜到结果（检查搜索规则）`);
       } catch (e) {
@@ -1036,6 +1071,186 @@
       el.disabled = false; el.textContent = '测试';
       save(true); renderSources();
     });
+  }
+
+  /* ---------------- 书源自动检测 ---------------- */
+  let detectAbort = false;
+
+  function openDetectDialog() {
+    const st = S.state;
+    const nFiltered = srcFiltered().length;
+    const nEnabled = st.sources.filter(s => s.enabled).length;
+    /* 关键词要短：用整本书名会让很多源搜不到，被误判成「较差」 */
+    const defKw = '剑';
+    const done = st.sources.filter(s => s.quality).length;
+
+    openModal(`
+      <h3>书源自动检测</h3>
+      <p class="desc">对每个书源跑一次真实搜索${''}，再抽样抓目录和正文，按结果分成 <b>优质 / 有效 / 较差 / 无用</b>。
+        检测完可以直接按质量分组，之后搜索和换源会优先用优质源。</p>
+      <div class="form-grid">
+        <div class="field full">
+          <label>检测范围</label>
+          <select id="dt-scope">
+            <option value="filtered">当前筛选（${nFiltered} 个）</option>
+            <option value="enabled">已启用（${nEnabled} 个）</option>
+            <option value="all">全部（${st.sources.length} 个）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>搜索关键词 <span>越短越通用：剑 / 斗罗 / 我的</span></label>
+          <input id="dt-kw" value="${esc(defKw)}" placeholder="常见字或书名" />
+        </div>
+        <div class="field">
+          <label>并发数 <span id="dt-conc-n">8</span></label>
+          <input type="range" id="dt-conc" min="4" max="16" value="8" />
+        </div>
+        <div class="field full">
+          <label class="cb"><input type="checkbox" id="dt-deep" checked /> 深度检测：抓目录和正文（更准，每个源多花几秒）</label>
+        </div>
+      </div>
+      ${done ? `<p class="desc" style="margin-top:12px">已检测过 ${done} 个，再次检测会覆盖旧结果。</p>` : ''}
+      <div class="modal-actions">
+        <button class="btn" id="dt-cancel">取消</button>
+        <button class="btn primary" id="dt-start">开始检测</button>
+      </div>
+      <div id="dt-live"></div>`, true);
+
+    $('#dt-cancel').onclick = closeModal;
+    const conc = $('#dt-conc');
+    conc.oninput = () => { $('#dt-conc-n').textContent = conc.value; };
+    $('#dt-start').onclick = () => startDetect();
+  }
+
+  async function startDetect() {
+    const st = S.state;
+    const scope = $('#dt-scope').value;
+    const kw = ($('#dt-kw').value || '').trim() || '剑';
+    const deep = $('#dt-deep').checked;
+    const conc = +$('#dt-conc').value || 8;
+
+    let targets = scope === 'filtered' ? srcFiltered() : scope === 'enabled' ? st.sources.filter(s => s.enabled) : st.sources.slice();
+    targets = targets.filter(s => s.url || s.searchUrl);
+    if (!targets.length) { toast('没有可检测的书源'); return; }
+
+    /* 书架里用过的源，直接拿那本书的地址深检，比搜索关键词更靠谱 */
+    const probe = new Map();
+    for (const b of st.books) if (b.sourceId && b.bookUrl) probe.set(b.sourceId, b.bookUrl);
+
+    detectAbort = false;
+    const live = $('#dt-live');
+    $('#dt-start').disabled = true;
+    $('#dt-scope').disabled = true;
+    live.innerHTML = `
+      <div class="dt-bar"><i id="dt-bar-i"></i></div>
+      <div class="dt-line"><span id="dt-cur">准备中…</span><span id="dt-count">0 / ${targets.length}</span></div>
+      <div class="dt-tags">
+        ${['great', 'ok', 'poor', 'dead'].map(k => `<span class="chip q-${k}" id="dt-n-${k}">${Q_NAME[k]} 0</span>`).join('')}
+      </div>
+      <div class="modal-actions"><button class="btn danger" id="dt-stop">中断</button></div>`;
+    $('#dt-stop').onclick = () => { detectAbort = true; $('#dt-cur').textContent = '正在中断…'; };
+
+    const t0 = Date.now();
+    let lastSave = 0;
+    const res = await Detect.run({
+      sources: targets,
+      fetch: mo.net,
+      keyword: kw,
+      deep,
+      concurrency: conc,
+      timeout: 9000,
+      probeUrlOf: s => probe.get(s.id) || '',
+      shouldStop: () => detectAbort,
+      onProgress: (done, total, sum, r) => {
+        const pct = Math.round(done / total * 100);
+        const bar = $('#dt-bar-i');
+        if (bar) bar.style.width = pct + '%';
+        const cur = $('#dt-cur');
+        if (cur) cur.textContent = `${done}/${total} · ${r.name.slice(0, 18)} → ${Q_NAME[r.quality] || ''}${r.note ? '（' + r.note + '）' : ''}`;
+        const c = $('#dt-count');
+        if (c) c.textContent = `${done} / ${total}`;
+        for (const k of ['great', 'ok', 'poor', 'dead']) {
+          const el = $('#dt-n-' + k);
+          if (el) el.textContent = `${Q_NAME[k]} ${sum[k] || 0}`;
+        }
+        /* 增量落盘，避免中断后白测 */
+        if (done - lastSave >= 15) { lastSave = done; save(true); }
+      },
+      onResult: r => {
+        const s = sourceById(r.id);
+        if (!s) return;
+        s.quality = r.quality;
+        s.qScore = r.score;
+        s.qNote = r.note || '';
+        s.qAt = Date.now();
+        s.qMs = r.ms;
+        s.qChapters = r.chapters;
+        s.qChars = r.chars;
+        s.lastError = r.quality === 'dead' ? (r.note || '') : '';
+        if (r.ms) s.lastLatency = r.ms;
+      }
+    });
+
+    save(true);
+    renderSources();
+    const sec = Math.round((Date.now() - t0) / 1000);
+    live.innerHTML = `
+      <div class="dt-done">
+        <div class="dt-sum">
+          <span class="chip q-great">优质 ${res.summary.great || 0}</span>
+          <span class="chip q-ok">有效 ${res.summary.ok || 0}</span>
+          <span class="chip q-poor">较差 ${res.summary.poor || 0}</span>
+          <span class="chip q-dead">无用 ${res.summary.dead || 0}</span>
+        </div>
+        <p class="desc">共测 ${res.total} 个${res.stopped ? '（已中断）' : ''}，用时 ${sec} 秒${deep ? '' : '（未深检，只测了搜索）'}。</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="dt-group">按质量分组</button>
+        <button class="btn" id="dt-restore">还原原分组</button>
+        <button class="btn danger" id="dt-off">停用无用源</button>
+        <button class="btn primary" id="dt-ok">完成</button>
+      </div>`;
+    $('#dt-ok').onclick = () => { closeModal(); renderSources(); };
+    $('#dt-group').onclick = () => { groupByQuality(); };
+    $('#dt-restore').onclick = () => { restoreQualityGroups(); };
+    $('#dt-off').onclick = () => {
+      const dead = st.sources.filter(s => s.quality === 'dead' && s.enabled);
+      if (!dead.length) return toast('没有需要停用的源');
+      if (!confirm(`停用 ${dead.length} 个「无用」书源？`)) return;
+      for (const s of dead) s.enabled = false;
+      save(true); renderSources(); toast(`已停用 ${dead.length} 个无用源`);
+    };
+    toast(`检测完成：优质 ${res.summary.great || 0} / 有效 ${res.summary.ok || 0} / 较差 ${res.summary.poor || 0} / 无用 ${res.summary.dead || 0}`);
+  }
+
+  const Q_GROUP = { great: '优质源', ok: '可用源', poor: '较差源', dead: '失效源' };
+  function groupByQuality() {
+    const st = S.state;
+    let n = 0;
+    for (const s of st.sources) {
+      if (!s.quality || !Q_GROUP[s.quality]) continue;
+      if (s.group0 === undefined) s.group0 = s.group || '未分组';
+      s.group = Q_GROUP[s.quality];
+      n++;
+    }
+    if (!n) return toast('还没有检测结果，先跑一次检测');
+    save(true);
+    renderSources();
+    toast(`已把 ${n} 个书源归入「优质源 / 可用源 / 较差源 / 失效源」四个分组`);
+  }
+  function restoreQualityGroups() {
+    const st = S.state;
+    let n = 0;
+    for (const s of st.sources) {
+      if (s.group0 === undefined) continue;
+      s.group = s.group0;
+      delete s.group0;
+      n++;
+    }
+    if (!n) return toast('没有可还原的分组');
+    save(true);
+    renderSources();
+    toast(`已还原 ${n} 个书源的原始分组`);
   }
 
   function normalizeMany(json) {
@@ -1352,6 +1567,7 @@
           <div class="row"><div class="rl">上一章 / 下一章</div><span><span class="kbd">←</span> <span class="kbd">→</span></span></div>
           <div class="row"><div class="rl">翻页（分页模式）</div><span><span class="kbd">PgUp</span> <span class="kbd">PgDn</span></span></div>
           <div class="row"><div class="rl">字号 / 主题 / 目录 / 书签</div><span><span class="kbd">+</span><span class="kbd">-</span><span class="kbd">T</span><span class="kbd">C</span><span class="kbd">B</span></span></div>
+          <div class="row"><div class="rl">全屏 / 退出全屏</div><span><span class="kbd">F11</span> 或 <span class="kbd">F</span></span></div>
           <div class="row"><div class="rl">退出阅读</div><span class="kbd">Esc</span></div>
         </div>
 
@@ -1752,9 +1968,13 @@
     clearInterval(R.timer);
     R.timer = null;
     $('#reader').classList.remove('open');
+    $('#r-toc-panel').classList.remove('open');
+    $('#toc-mask').classList.remove('on');
     R.book = null;
+    if (mo.win.isFull) mo.win.fullscreen();
     save(true);
-    renderShelf();
+    /* 无论从哪个视图（搜索/书签/历史）进的阅读器，返回都回到书架 */
+    if (S.view !== 'shelf') setView('shelf'); else renderShelf();
   }
 
   function startReadingTimer() {
@@ -2199,14 +2419,18 @@
   async function switchSource() {
     const b = R.book || (S.state.books.find(x => x.id === S.switchBookId));
     if (!b) return;
-    const all = S.state.sources.filter(s => s.enabled && s.searchUrl);
+    /* 检测为「无用」的源直接跳过：换源本来就慢，不要把时间浪费在打不开的站上 */
+    const enabled = S.state.sources.filter(s => s.enabled && s.searchUrl);
+    const alive = enabled.length > 8 ? enabled.filter(s => s.quality !== 'dead') : enabled;
+    const all = alive.length ? alive : enabled;
     if (!all.length) { toast('没有启用的网络书源，先去「书源」里启用'); return; }
-    // 书源可能有几千个，全量搜太慢：按「书架在用 / 搜成功过」优先取一批
+    // 书源可能有几千个，全量搜太慢：按「优质 > 有效 > 书架在用」优先取一批
     const cap = clamp(S.state.settings.searchLimit || 40, 1, 500);
     const srcs = pickSearchSources(all, cap);
+    const skipped = enabled.length - all.length;
 
     openModal(`<h3>换源 · ${esc(b.name)}</h3>
-      <p class="desc">在 ${srcs.length} 个书源里找同名书（共启用 ${all.length} 个）${srcs.length < all.length ? '，可在设置里调整上限' : ''}。<br>当前读到：${esc(R.title || '未开始')}（第 ${(R.ci || 0) + 1} 章）</p>
+      <p class="desc">在 ${srcs.length} 个书源里找同名书（共启用 ${enabled.length} 个${skipped > 0 ? `，已跳过 ${skipped} 个检测为「无用」的源` : ''}）${srcs.length < all.length ? '，可在设置里调整上限' : ''}。<br>当前读到：${esc(R.title || '未开始')}（第 ${(R.ci || 0) + 1} 章）</p>
       <div class="sw-list" id="sw-list"><div class="hint">搜索中…</div></div>
       <div class="modal-actions"><button class="btn" onclick="window.__closeModal()">关闭</button></div>`, true);
 
@@ -2219,7 +2443,7 @@
         if (hits.length >= 12) return; // 够用了就别再扫，省时间
         const s = srcs[cursor++];
         try {
-          const r = await Engine.search(mo.net, s, kw);
+          const r = await withTimeout(Engine.search(mo.net, s, kw), 8000);
           for (const x of r) {
             const a = normChapTitle(x.name), t = normChapTitle(kw);
             if (a === t || a.includes(t) || t.includes(a)) hits.push(x);
@@ -2293,9 +2517,27 @@
 
 
   /* ---------------- 绑定阅读器 ---------------- */
+  /* ---------------- 全屏 ---------------- */
+  async function toggleFullscreen() {
+    const on = await mo.win.fullscreen();
+    syncFullscreen(!!on);
+  }
+  function syncFullscreen(on) {
+    document.body.classList.toggle('is-full', !!on);
+    const btn = $('#r-full');
+    if (btn) {
+      btn.classList.toggle('on', !!on);
+      btn.title = on ? '退出全屏 (F11)' : '全屏 (F11)';
+    }
+    if (R.book && S.state.settings.pageMode === 'paged') { R.page = 0; renderChapter(0); }
+  }
+
   function bindReader() {
     $('#r-back').onclick = closeReader;
     $('#r-close').onclick = closeReader;
+    $('#r-full').onclick = toggleFullscreen;
+    if (mo.win.onState) mo.win.onState(s => { if (s && typeof s.fullscreen === 'boolean') syncFullscreen(s.fullscreen); });
+    mo.win.isFull().then(v => syncFullscreen(!!v)).catch(() => {});
     $('#r-prev').onclick = () => turnPageOrChapter(-1);
     $('#r-next').onclick = () => turnPageOrChapter(1);
 
@@ -2358,6 +2600,8 @@
       }
       if (typing) return;
       switch (e.key) {
+        case 'F11': e.preventDefault(); toggleFullscreen(); break;
+        case 'f': case 'F': e.preventDefault(); toggleFullscreen(); break;
         case 'ArrowLeft': case 'PageUp': e.preventDefault(); turnPageOrChapter(-1); break;
         case 'ArrowRight': case 'PageDown': e.preventDefault(); turnPageOrChapter(1); break;
         case 'ArrowUp': if (S.state.settings.pageMode === 'scroll') { $('#r-stage').scrollBy({ top: -260, behavior: 'smooth' }); e.preventDefault(); } break;
@@ -2373,6 +2617,7 @@
         case 'b': case 'B': addBookmark(); break;
         case 'Escape':
           if ($('#r-toc-panel').classList.contains('open')) { $('#toc-mask').click(); }
+          else if (document.body.classList.contains('is-full')) { toggleFullscreen(); }
           else closeReader();
           break;
       }
