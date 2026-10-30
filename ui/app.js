@@ -6,6 +6,9 @@
   const mo = window.mo;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  /* 安卓版：bridge.js 会把 Node 兼容层挂到 window.MoNative 上 */
+  const IS_ANDROID = !!window.MoNative;
+  const layoutMode = () => document.documentElement.getAttribute('data-layout') || '';
 
   const S = {
     state: null,
@@ -1503,8 +1506,8 @@
 
         <div class="card">
           <h3>系统</h3>
-          <div class="row"><div class="rl">关闭窗口时最小化到托盘<small>开启后点 × 不会退出程序</small></div>
-            <div class="switch ${s.closeToTray ? 'on' : ''}" data-set="closeToTray"><i></i></div></div>
+          ${IS_ANDROID ? '' : `<div class="row"><div class="rl">关闭窗口时最小化到托盘<small>开启后点 × 不会退出程序</small></div>
+            <div class="switch ${s.closeToTray ? 'on' : ''}" data-set="closeToTray"><i></i></div></div>`}
           <div class="row"><div class="rl">搜索并发数<small>同时请求的书源数量，过大容易被限流</small></div>
             <div class="seg" id="s-conc">${[1, 2, 3, 4, 6].map(n => `<button data-v="${n}" class="${s.maxConcurrent === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
           <div class="row"><div class="rl">每次搜索的书源数<small>书源太多（比如几千个）时只搜一部分，优先书架用到的</small></div>
@@ -1742,6 +1745,12 @@
   async function restoreFromZip() {
     const r = await mo.pickZip();
     if (!r.ok) { if (r.error) toast(r.error); return; }
+    showRestoreConfirm(r);
+  }
+
+  /** 弹出恢复确认框——安卓「用墨读打开备份」也复用这里 */
+  function showRestoreConfirm(r) {
+    if (!r || !r.ok) { if (r && r.error) toast(r.error); return; }
     if (r.kind === 'sources') {
       const { added, updated } = mergeSources((r.sources || []).map(Engine.normalizeSource));
       return toast(`书源导入完成：新增 ${added}，更新 ${updated}`);
@@ -1752,7 +1761,7 @@
       <p class="desc">文件：${esc(r.name)}<br>
       格式：${isLegado ? '<b>原版「阅读」备份</b>（会自动转成墨读的书架与书源）' : '墨读完整备份'}<br>
       包含 ${s.books || 0} 本书、${s.sources || 0} 个书源、${s.bookmarks || 0} 条书签${s.withFiles ? '、以及本地书文件' : ''}
-      ${s.skippedLocal ? `<br><span style="color:#a33">另有 ${s.skippedLocal} 本原版本地书（手机上的文件路径），桌面端无法还原，已跳过</span>` : ''}</p>
+      ${s.skippedLocal ? `<br><span style="color:#a33">另有 ${s.skippedLocal} 本原版本地书（手机上的文件路径），无法还原，已跳过</span>` : ''}</p>
       <div class="modal-actions">
         <button class="btn left" onclick="window.__closeModal()">取消</button>
         <button class="btn" id="rs-merge">合并进现有书架</button>
@@ -2362,7 +2371,9 @@
     const cfg = ttsCfg();
     const voices = ttsOrderedVoices();
     openModal(`<h3>朗读设置</h3>
-      <p class="desc">音色来自 Windows 自带的语音引擎。系统里装过其他语言包的语音也会出现在列表里。</p>
+      <p class="desc">${IS_ANDROID
+        ? '音色来自手机自带的语音引擎，中文语音一般在「设置 → 系统 → 语言和输入法 → 文字转语音」里管理。'
+        : '音色来自 Windows 自带的语音引擎。系统里装过其他语言包的语音也会出现在列表里。'}</p>
       <div class="form-grid">
         <div class="field full"><label>音色 <span>共 ${voices.length} 个</span></label>
           <select id="tts-voice">
@@ -2624,6 +2635,60 @@
     });
   }
 
+  /* ===========================================================
+     安卓适配：返回键层级 / 横竖屏切换 / 外部打开文件
+     =========================================================== */
+  function bindAndroid() {
+    if (!IS_ANDROID) return;
+
+    /* 返回键：弹窗 → 目录抽屉 → 全屏 → 阅读器 → 回书架 → 系统（再按一次退出） */
+    window.__moreadOnBack = () => {
+      if ($('#modal').classList.contains('open')) { closeModal(); return true; }
+      if ($('#reader').classList.contains('open')) {
+        if ($('#r-toc-panel').classList.contains('open')) { $('#toc-mask').click(); return true; }
+        if (document.body.classList.contains('is-full')) { toggleFullscreen(); return true; }
+        closeReader();
+        return true;
+      }
+      if (S.view !== 'shelf') { setView('shelf'); return true; }
+      return false;
+    };
+
+    /* 阅读时保持屏幕常亮，退出阅读自动恢复 */
+    const readerEl = $('#reader');
+    const keepLite = on => { try { window.MoNative.call('ui.keepScreenOn', { on: !!on }); } catch (e) { /* ignore */ } };
+    new MutationObserver(() => keepLite(readerEl.classList.contains('open')))
+      .observe(readerEl, { attributes: true, attributeFilter: ['class'] });
+
+    /* 在别的应用里用「墨读」打开 txt / epub / 备份 zip */
+    window.addEventListener('moread:openfile', async e => {
+      const p = (e && e.detail) || {};
+      if (!p.path) return;
+      try {
+        if (/\.zip$/i.test(p.name || '')) {
+          const r = await mo.testImportZip(p.path);
+          if (!r.ok) return toast(r.error || '无法识别这个备份');
+          setView('settings');
+          showRestoreConfirm(r);
+        } else if (/\.json$/i.test(p.name || '')) {
+          const r = await mo.pickZip ? null : null;
+          void r;
+          toast('书源 JSON 请在「书源 → 导入」里选择');
+        } else {
+          const out = await mo.importLocal([p.path]);
+          const okCount = (out || []).filter(x => x && !x.error).length;
+          const err = (out || []).find(x => x && x.error);
+          await boot();
+          renderShelf();
+          setView('shelf');
+          toast(okCount ? `已导入 ${okCount} 本` : ('导入失败：' + (err && err.error || '不支持的文件')));
+        }
+      } catch (err) {
+        toast('打开失败：' + (err.message || err));
+      }
+    });
+  }
+
   /* ---------------- 启动 ---------------- */
   if (mo.testMode) {
     window.__t = {
@@ -2634,6 +2699,7 @@
     };
   }
   bindReader();
+  bindAndroid();
   boot().catch(e => {
     document.body.innerHTML = '<div style="padding:40px;font-family:sans-serif;color:#a33">启动失败：' + esc(e.message) + '</div>';
     console.error(e);

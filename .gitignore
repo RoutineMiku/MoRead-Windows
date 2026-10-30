@@ -9,6 +9,15 @@ data/
 .tmp-*/
 *.log
 
+# 安卓构建（产物与离线工具链都很大，按需本地生成）
+.androidenv/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/nodebundle.js
+android/app/src/main/assets/ui/
+
 # 系统文件
 Thumbs.db
 .DS_Store

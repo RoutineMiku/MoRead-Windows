@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- 只备份用户数据，不备份章节缓存 -->
+    <include domain="file" path="data.json" />
+    <include domain="file" path="books" />
+    <exclude domain="file" path="cache" />
+</full-backup-content>
