@@ -676,18 +676,22 @@
   const mo = {
     testMode: false,
 
-    /* ---- 窗口（安卓上没有概念，只做最小兼容，避免调用处报错） ---- */
+    /* ---- 窗口（安卓上没有概念，只做最小兼容，避免调用处报错） ----
+       注意：桌面 preload 的这几个方法走 ipcRenderer.invoke，返回的都是 Promise，
+       ui/app.js 里有 `mo.win.isFull().then(...)` 这种写法。这里必须同样返回 Promise，
+       否则那一行会抛 "isFull(...).then is not a function"，而它在模块顶层执行，
+       一抛整个 app.js 就中断 —— 所有按钮都不会被绑上事件，表现就是「点什么都没反应」。 */
     win: {
-      minimize: () => NB.call('win.minimize'),
-      maximize: () => false,
-      close: () => NB.call('win.minimize'),
-      isMax: () => false,
+      minimize: async () => { NB.call('win.minimize'); },
+      maximize: async () => false,
+      close: async () => { NB.call('win.minimize'); },
+      isMax: async () => false,
       fullscreen: async () => {
         const r = NB.call('win.fullscreen');
         document.body.classList.toggle('is-full', !!r.full);
         return !!r.full;
       },
-      isFull: () => !!NB.call('win.isFull').full,
+      isFull: async () => !!NB.call('win.isFull').full,
       onState: cb => window.addEventListener('moread:winstate', e => cb(e.detail || {}))
     },
 

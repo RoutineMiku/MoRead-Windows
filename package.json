@@ -14,7 +14,9 @@
     "android:build": "node build/android-build.js",
     "android:release": "node build/android-build.js --release",
     "android:sim": "node test/android-sim.js",
-    "test": "node test/test-backup.js"
+    "test": "node test/test-backup.js",
+    "android:ui": "node build/gen-nodebundle.js && node test/run-android-ui.js",
+    "android:check": "node test/run-android-ui.js"
   },
   "devDependencies": {
     "electron": "^45.0.0",

@@ -22,3 +22,6 @@ android/app/src/main/assets/ui/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# 安卓 UI 仿真运行目录
+test/.run/

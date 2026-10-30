@@ -1,0 +1,7 @@
+{
+  "name": "moread-android-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "main": "app.js",
+  "description": "安卓端 UI 端到端仿真：真实 Chromium 加载真实 ui/，验证横竖屏 / 折叠屏 / 可点击性"
+}

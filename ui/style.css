@@ -694,3 +694,29 @@ html[data-layout="wide"] .page{
   html:not([data-layout]) .btn{min-height:44px;touch-action:manipulation;}
   html:not([data-layout]) .rail-btn svg{width:22px;height:22px;}
 }
+
+/* ==================================================================
+ * 横屏手机高度很紧：左侧栏七个入口必须一屏内放得下
+ * 否则最下面那个「设置」会被挤出可视区 —— 手指点过去是空的，
+ * 而且没有任何报错（命中测试在这里返回 null 才暴露出来）。
+ * 先压缩让它放得下，实在放不下就允许侧栏滚动，总比点不到好。
+ * ================================================================== */
+html[data-layout="landscape"] .rail{
+  overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+}
+html[data-layout="landscape"] .rail::-webkit-scrollbar{width:0;height:0;}
+html[data-layout="landscape"] .rail-btn{min-height:40px;flex:0 0 auto;}
+html[data-layout="landscape"] .rail-gap{flex:1 1 0;min-height:0;}
+
+@media (max-height:460px){
+  html[data-layout="landscape"] .rail{
+    padding-top:4px;padding-bottom:calc(2px + var(--sa-bottom));gap:0;
+  }
+  /* 七个入口按可用高度均分，而不是各自撑到 min-height —— 后者在 393px 高的
+     手机横屏上会溢出 45px，把最后一个「设置」顶出屏幕 */
+  html[data-layout="landscape"] .rail-btn{
+    flex:1 1 0;min-height:0;height:auto;padding:2px;gap:1px;overflow:hidden;
+  }
+  html[data-layout="landscape"] .rail-btn svg{width:20px;height:20px;flex:0 0 20px;}
+  html[data-layout="landscape"] .rail-gap{display:none;}
+}

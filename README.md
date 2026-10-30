@@ -31,7 +31,8 @@
 | 直接用 | 手机装上 `dist/墨读-android.apk`（Android 8.0 以上，debug 签名） |
 | 自己编译 | `npm run android:build` → `android/app/build/outputs/apk/debug/app-debug.apk` |
 | 不带 Android Studio | 第一次跑 `node build/prepare-android.js` 会下载好 JDK / SDK / Gradle 到 `.androidenv/`（约 500MB，之后离线可用） |
-| 无手机验证 | `npm run android:sim` 在 Node 里把安卓那条链路跑一遍（详见「安卓实现原理」） |
+| 无手机验证 | `npm run android:ui` 在电脑上用真实 Chromium 按真机尺寸跑一遍界面（157 项检查，见下文） |
+| 无手机验证（逻辑层） | `npm run android:sim` 在 Node 里把安卓那条链路跑一遍（详见「安卓实现原理」） |
 
 > 安装时若提示「未知来源」，在系统设置里允许来自此来源的安装即可（debug 包没有应用商店签名）。
 
@@ -113,10 +114,29 @@
 
 ### 没有手机也能验证
 
-`npm run android:sim`（`test/android-sim.js`）在 Node 里把原生那几个方法重新实现一遍
-（`fs` / `zlib` / 弹窗 / 同步 HTTP 走子进程），再用 `vm` 跑真正的 `nodebundle.js`。
-19 项检查全绿，其中包括：解析真实备份得到 **43 本书 / 2916 个书源 / 1 条书签**（与桌面版完全一致）、
-以及一次真实联网抓取。
+有两层，都不需要手机或模拟器：
+
+**① 界面层 `npm run android:ui`（`test/android-e2e/`）**
+
+Electron 里开一个**真实的 Chromium**，加载**真实的 `ui/index.html`**，用 Node 实现一份
+`MoNativeBridge`（等价于 `MainActivity` 注入的原生层），然后按真机尺寸开窗口：
+
+| 场景 | 检查内容 |
+| --- | --- |
+| 手机竖屏 393×873 / 360×780、手机横屏 873×393 | 形态标记、功能栏位置（底部 / 左侧）、七个入口是否齐全、触摸目标 ≥ 40px |
+| 折叠屏展开竖握 717×1024 / 横握 1024×717、平板竖屏 / 横屏 | 同上，外加宽度档位 compact / medium |
+| 同一个窗口里改尺寸模拟旋转 | 旋转后形态与功能栏位置是否跟着变、按钮是否仍然可点 |
+| 兜底：兼容层脚本没被替换 / 完全没执行 | 布局是否仍然正确、桌面窗口按钮是否仍然被摘掉 |
+
+每个场景都会做**命中测试**（`elementFromPoint` 打在按钮中心，看最顶层元素是不是它）
+和**真点击**（点「设置」→ 视图切过去、高亮跟上 → 点回书架）。这两个检查就是为了抓
+「界面画出来了但点什么都没反应」「按钮被挤出屏幕」这类问题——它们不会抛异常，只靠肉眼很难发现。
+
+**② 逻辑层 `npm run android:sim`（`test/android-sim.js`）**
+
+在 Node 里把原生那几个方法重新实现一遍（`fs` / `zlib` / 弹窗 / 同步 HTTP 走子进程），
+再用 `vm` 跑真正的 `nodebundle.js`。33 项检查，其中包括：解析真实备份得到
+**43 本书 / 2916 个书源 / 1 条书签**（与桌面版完全一致）、一次真实联网抓取。
 
 ## 功能
 

@@ -95,10 +95,11 @@
     S.info = await mo.info();
     S.state = await mo.state.get();
     applySettings();
-    bindChrome();
-    bindNav();
-    renderShelf();
-    setView('shelf');
+    // 同样逐个隔离：绑定阶段任何一步挂掉都只丢它自己，不影响导航和其它功能
+    try { bindChrome(); } catch (e) { console.error('bindChrome 失败：', e); }
+    try { bindNav(); } catch (e) { console.error('bindNav 失败：', e); }
+    try { renderShelf(); } catch (e) { console.error('renderShelf 失败：', e); }
+    try { setView('shelf'); } catch (e) { console.error('setView 失败：', e); }
 
     // 系统语音是异步加载的，加载完刷新一下设置页上的音色名
     try {
@@ -157,10 +158,16 @@
 
   /* ---------------- 窗口 ---------------- */
   function bindChrome() {
-    $('#btn-min').onclick = () => mo.win.minimize();
-    $('#btn-max').onclick = () => mo.win.maximize();
-    $('#btn-close').onclick = () => mo.win.close();
-    $('#titlebar').addEventListener('dblclick', e => {
+    /* 安卓上 .winbtns 会被整块摘掉，这三个按钮根本不存在。
+       早年这里直接 `$('#btn-min').onclick = ...` —— null 上赋值会抛 TypeError，
+       而 bindChrome() 在 boot() 里排在 bindNav() 前面，一抛导航按钮就全都没绑上事件，
+       表现正是「界面好好的，但点什么都没反应」。所以这里必须判空。 */
+    const on = (sel, fn) => { const el = $(sel); if (el) el.onclick = fn; };
+    on('#btn-min', () => mo.win.minimize());
+    on('#btn-max', () => mo.win.maximize());
+    on('#btn-close', () => mo.win.close());
+    const tbar = $('#titlebar');
+    if (tbar) tbar.addEventListener('dblclick', e => {
       if (e.target.closest('button')) return;
       mo.win.maximize();
     });
@@ -243,6 +250,7 @@
 
   function bindDropZone() {
     const dz = $('#dropzone');
+    if (!dz) return;                 // 安卓版摘掉了拖放区
     let depth = 0;
     window.addEventListener('dragenter', e => { e.preventDefault(); depth++; dz.classList.add('on'); });
     window.addEventListener('dragover', e => e.preventDefault());
@@ -2548,7 +2556,9 @@
     $('#r-close').onclick = closeReader;
     $('#r-full').onclick = toggleFullscreen;
     if (mo.win.onState) mo.win.onState(s => { if (s && typeof s.fullscreen === 'boolean') syncFullscreen(s.fullscreen); });
-    mo.win.isFull().then(v => syncFullscreen(!!v)).catch(() => {});
+    // 包一层 Promise.resolve：就算哪天 isFull 返回的不是 Promise，也只丢一个全屏状态，
+    // 不会在模块顶层抛异常把后面所有绑定（含 bindAndroid / boot）全部带走
+    Promise.resolve(mo.win.isFull()).then(v => syncFullscreen(!!v)).catch(() => {});
     $('#r-prev').onclick = () => turnPageOrChapter(-1);
     $('#r-next').onclick = () => turnPageOrChapter(1);
 
@@ -2718,10 +2728,20 @@
       openReader, loadChapter, runSearch, ttsVoices, ttsOrderedVoices, pickSearchSources
     };
   }
-  bindReader();
-  bindAndroid();
+  // 逐个隔离：任何一步出错只丢它自己的功能，绝不能把整个 app.js 的初始化带走。
+  // （踩过：bindReader 里一行抛异常 → 后面的 bindAndroid / boot 全没跑 →
+  //   界面画出来了但所有按钮都是死的，而且没有任何可见报错）
+  try { bindReader(); } catch (e) { console.error('bindReader 失败：', e); }
+  try { bindAndroid(); } catch (e) { console.error('bindAndroid 失败：', e); }
   boot().catch(e => {
-    document.body.innerHTML = '<div style="padding:40px;font-family:sans-serif;color:#a33">启动失败：' + esc(e.message) + '</div>';
     console.error(e);
+    // 用浮层而不是清空 body：界面还在，用户至少能看清出了什么事
+    try {
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;z-index:99999;left:0;right:0;top:0;padding:14px 16px;' +
+        'background:#b3261e;color:#fff;font:14px/1.6 system-ui;';
+      d.textContent = '启动失败：' + esc(e.message || e);
+      document.body.appendChild(d);
+    } catch (_) { }
   });
 })();

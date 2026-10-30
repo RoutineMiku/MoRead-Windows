@@ -6,6 +6,42 @@
      图标只有十几物理像素，点也点不准。桌面 Chromium 不使用移动视口，这句对它无效。 -->
 <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
 <title>墨读</title>
+<!--
+  形态标记（竖屏 / 横屏）：必须在这里同步跑完，且不能依赖任何外部脚本。
+
+  之前这个标记由安卓的 nodebundle.js 打上。一旦那份脚本没跑起来（打包没替换、
+  WebView 请求拦截没触发、旧 WebView 语法不兼容……任何一种），页面就会静默退回
+  电脑版布局：左侧功能栏 + 右上角最小化/最大化/关闭，而且控制台没有任何线索。
+
+  所以这里用最保守的 ES5 再打一次，并自己盯住 resize / orientationchange / visualViewport。
+  判定只认「原生对象存在」或「UA 带 MoReadAndroid」，桌面 Electron 两个都不满足，直接跳过。
+-->
+<script>
+(function () {
+  var isApp = (typeof MoNativeBridge !== 'undefined') ||
+              (navigator.userAgent && navigator.userAgent.indexOf('MoReadAndroid') >= 0);
+  if (!isApp) return;
+  var de = document.documentElement;
+  de.className += ' is-android';
+  function bucket(v) { return v >= 840 ? 'expanded' : (v >= 600 ? 'medium' : 'compact'); }
+  function apply() {
+    var w = window.innerWidth, h = window.innerHeight;
+    if (!w || !h) return;
+    de.setAttribute('data-layout', w > h ? 'landscape' : 'portrait');
+    if (!de.getAttribute('data-sw')) de.setAttribute('data-sw', bucket(Math.min(w, h)));
+  }
+  apply();
+  window.addEventListener('resize', apply);
+  window.addEventListener('orientationchange', function () { apply(); setTimeout(apply, 120); setTimeout(apply, 420); });
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', apply);
+  function strip() {
+    var n = document.querySelector('.winbtns'); if (n && n.parentNode) n.parentNode.removeChild(n);
+    var d = document.querySelector('.dropzone'); if (d && d.parentNode) d.parentNode.removeChild(d);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', strip);
+  else strip();
+})();
+</script>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
