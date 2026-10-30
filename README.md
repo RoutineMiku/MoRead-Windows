@@ -6,7 +6,7 @@
 > 这个项目按 Legado 的使用习惯重写了一版 Windows 桌面端：**本地书 + Legado 书源 + 网页搜书 + 坚果云同步**，
 > 存档格式与原版「阅读」双向兼容，可以直接导入原版「阅读」导出的 zip 备份。
 
-**下载**：本仓库 Releases 里的 `墨读-win32-x64.zip`，解压后双击 `墨读.exe` 即可，免安装、不写注册表、数据跟着程序走。
+**下载**：本仓库 Releases 里的 `MoRead-win32-x64.zip`，解压后双击 `墨读.exe` 即可，免安装、不写注册表、数据跟着程序走。
 
 ![书架](docs/screenshots/shot_shelf.png)
 
@@ -149,7 +149,7 @@ test/probe.js     把任意 JS 片段放进真实应用里跑（调试规则/界
 
 ## 截图
 
-| 书架（导入真实 Legado 备份） | 网页搜书 |
+| 书架（演示数据，可导入原版阅读备份） | 网页搜书 |
 | --- | --- |
 | ![书架](docs/screenshots/shot_shelf.png) | ![网页搜书](docs/screenshots/shot_search.png) |
 
