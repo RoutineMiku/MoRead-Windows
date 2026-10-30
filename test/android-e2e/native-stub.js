@@ -41,8 +41,11 @@ function httpRequestSync(a) {
     }catch(e){out({error:e.message})}
   `;
   try {
+    // 在 Electron 里 process.execPath 指向 electron.exe，直接 spawn 会拉起一个 GUI
+    // 而不是 Node（表现为请求挂到超时）。加上这个变量它就按 Node 跑。
+    const env = Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: '1' });
     const r = spawnSync(process.execPath, ['--no-warnings', '-e', script, JSON.stringify(a)], {
-      encoding: 'utf8', timeout: (a.timeout || 18000) + 8000
+      encoding: 'utf8', timeout: (a.timeout || 18000) + 8000, env
     });
     const s = String(r.stdout || '').trim();
     const i = s.indexOf('{'), j = s.lastIndexOf('}');

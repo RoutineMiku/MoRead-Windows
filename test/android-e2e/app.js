@@ -218,8 +218,38 @@ async function scenario(sc) {
     }
   }
 
+  if (sc.allowNoMo) {
+    // 兼容层挂掉时必须自动弹出自检面板，否则用户面对的就是一个「安静的死界面」
+    await sleep(3000);
+    const panel = await win.webContents.executeJavaScript(
+      `!!document.getElementById('mo-diag')`, true).catch(() => false);
+    ok('兼容层挂掉时自检面板自动弹出', panel === true);
+  }
+
   await new Promise(r => { win.once('closed', r); win.close(); });
   await sleep(400);
+}
+
+/* 顺带把自检面板本身也验一遍：它在正常环境下各项是否真的 OK。
+   这同时等于验了文件读写 / zlib / 大文件 XHR / 联网这几条真实数据通路。 */
+async function diagScenario() {
+  console.log('\n  ▸ 自检面板内容核对（正常环境）');
+  const R32 = { tl: 32, tr: 32, bl: 32, br: 32 };
+  const win = await openWindow(path.join(RUN, 'stage'), 393, 873, { sw: 393, corners: R32 });
+  await win.webContents.executeJavaScript('window.__moreadDiag(null)', true);
+  await sleep(3500);
+  const txt = await win.webContents.executeJavaScript(
+    `(function(){var p=document.getElementById('mo-diag');return p?(p.innerText||p.textContent):''})()`, true);
+  const netLine = (txt.match(/联网测试：.*/) || ['（没读到）'])[0];
+  ok('自检面板能打开', txt.length > 200);
+  ok('bundle 已执行', /bundle 已执行[\s\S]{0,80}是/.test(txt));
+  ok('文件读写一致 = OK', /文件读写一致[\s\S]{0,40}OK/.test(txt));
+  ok('大文件 XHR 一致 = OK', /大文件 XHR[\s\S]{0,90}OK/.test(txt));
+  ok('zlib = OK', /zlib[\s\S]{0,30}OK/.test(txt));
+  ok('联网测试 = HTTP 200', /HTTP 200/.test(netLine), netLine);
+  ok('无页面错误记录', !/\[error\]/.test(txt));
+  await new Promise(r => { win.once('closed', r); win.close(); });
+  await sleep(300);
 }
 
 async function main() {
@@ -259,6 +289,8 @@ async function main() {
     try { await scenario(sc); }
     catch (e) { ok(sc.title + ' 场景执行异常', false, String(e && e.message || e)); }
   }
+  try { await diagScenario(); }
+  catch (e) { ok('自检面板场景执行异常', false, String(e && e.message || e)); }
 
   console.log('\n' + '─'.repeat(64));
   console.log('  通过 ' + pass.length + ' 项，失败 ' + fail.length + ' 项');

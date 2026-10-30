@@ -42,6 +42,152 @@
   else strip();
 })();
 </script>
+<!--
+  安卓自检面板。纯 ES5，只依赖「有没有 MoNativeBridge」，所以即使兼容层彻底挂掉它也能跑。
+    · 兼容层没起来时 2.5 秒后自动弹出（否则界面看着正常但所有功能都是死的一片安静）
+    · 也可以长按顶栏 1.2 秒手动打开
+  它会把桥通不通、文件读写、大文件 XHR、联网、WebView 版本逐项列出来，便于定位。
+-->
+<script>
+(function () {
+  var isApp = (typeof MoNativeBridge !== 'undefined') ||
+              (navigator.userAgent && navigator.userAgent.indexOf('MoReadAndroid') >= 0);
+  if (!isApp) return;
+
+  window.__moLog = [];
+  window.addEventListener('error', function (e) {
+    try { window.__moLog.push('[error] ' + (e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || '')); } catch (x) { }
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    try { window.__moLog.push('[reject] ' + ((e.reason && (e.reason.message || e.reason)) || '')); } catch (x) { }
+  });
+  var ce = console.error;
+  console.error = function () {
+    try { window.__moLog.push('[console] ' + Array.prototype.slice.call(arguments).join(' ').slice(0, 300)); } catch (x) { }
+    if (ce) ce.apply(console, arguments);
+  };
+
+  function call(name, args) {
+    try { return String(MoNativeBridge.callSync(name, args || '{}')).slice(0, 240); }
+    catch (e) { return 'ERROR: ' + (e && e.message || e); }
+  }
+  function jsons(args) { try { return JSON.stringify(args); } catch (e) { return '{}'; } }
+
+  var items = [];
+  function add(k, v) { items.push([k, String(v)]); }
+
+  function collect() {
+    items = [];
+    add('WebView', navigator.userAgent);
+    add('视口', window.innerWidth + ' × ' + window.innerHeight + '   dpr=' + window.devicePixelRatio);
+    add('形态标记', document.documentElement.getAttribute('data-layout') + ' / ' + document.documentElement.getAttribute('data-sw'));
+    add('原生对象 MoNativeBridge', typeof MoNativeBridge);
+    add('桥 env.info', call('env.info'));
+    add('桥 env.layout', call('env.layout'));
+    add('桥 env.insets', call('env.insets'));
+    add('bundle 已执行', typeof window.__MOREAD_MODULES__ !== 'undefined' ? '是（' + Object.keys(window.__MOREAD_MODULES__).join(',') + '）' : '否');
+    add('window.mo', typeof window.mo);
+    add('window.MoNative', typeof window.MoNative);
+    add('window.MoApp', typeof window.MoApp);
+    add('文件写入', call('file.write', jsons({ path: 'diag/probe.txt', text: 'hello-modu' })));
+    var rd = call('file.read', jsons({ path: 'diag/probe.txt', text: true }));
+    add('文件读回', rd);
+    try { add('文件读写一致', JSON.parse(rd).text === 'hello-modu' ? 'OK' : '不一致'); }
+    catch (e) { add('文件读写一致', '解析失败'); }
+    // 大文件走的是「超过 512KB 返回 file:// 路径 + 同步 XHR 读取」那条路
+    try {
+      var big = new Array(600 * 1024 + 1).join('x');
+      call('file.write', jsons({ path: 'diag/big.txt', text: big }));
+      var r = JSON.parse(call('file.read', jsons({ path: 'diag/big.txt', text: true })));
+      if (!r.tooBig) add('大文件分支', '未触发（size=' + (r.size || 0) + '）');
+      else {
+        var x = new XMLHttpRequest();
+        x.open('GET', r.abs, false); x.send(null);
+        var t = x.responseText || '';
+        add('大文件 XHR', '读到 ' + t.length + ' 字符（写入 ' + big.length + '）' + (t.length === big.length ? '  OK' : '  不一致'));
+      }
+    } catch (e) { add('大文件 XHR', 'ERROR: ' + (e && e.message || e)); }
+    add('zlib', (function () {
+      try {
+        var r = JSON.parse(call('zlib.deflateRaw', jsons({ b64: btoa('hello') })));
+        return r.b64 ? 'OK' : ('ERROR ' + (r.error || ''));
+      } catch (e) { return 'ERROR: ' + (e && e.message || e); }
+    })());
+    add('JS 引擎', (function () {
+      try { new Function('return ({a:1})?.a'); return '支持可选链（较新）'; }
+      catch (e) { return '不支持可选链（WebView 较旧，但本项目未使用该语法）'; }
+    })());
+    add('页面错误', window.__moLog.length ? window.__moLog.join('\n') : '（无）');
+  }
+
+  function render(extra) {
+    var old = document.getElementById('mo-diag');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    var wrap = document.createElement('div');
+    wrap.id = 'mo-diag';
+    wrap.style.cssText = 'position:fixed;z-index:999999;left:0;top:0;right:0;bottom:0;overflow:auto;' +
+      'background:#fff;color:#111;font:13px/1.65 monospace;padding:14px 14px 40px;-webkit-overflow-scrolling:touch;';
+    var h = '<div style="font:600 16px/1.4 system-ui;margin-bottom:10px">墨读 · 自检</div>';
+    if (extra) h += '<div style="background:#b3261e;color:#fff;padding:8px 10px;border-radius:6px;margin-bottom:10px">' + extra + '</div>';
+    for (var i = 0; i < items.length; i++) {
+      h += '<div style="border-bottom:1px solid #eee;padding:6px 0">' +
+        '<div style="color:#666">' + String(items[i][0]).replace(/</g, '&lt;') + '</div>' +
+        '<div style="white-space:pre-wrap;word-break:break-all">' + String(items[i][1]).replace(/</g, '&lt;') + '</div></div>';
+    }
+    h += '<div id="mo-diag-net" style="margin-top:10px;color:#333">联网测试：进行中…</div>';
+    h += '<button id="mo-diag-again" style="margin-top:12px;padding:10px 16px;font-size:15px">重新自检</button> ';
+    h += '<button id="mo-diag-close" style="margin-top:12px;padding:10px 16px;font-size:15px">关闭</button>';
+    wrap.innerHTML = h;
+    document.body.appendChild(wrap);
+    document.getElementById('mo-diag-close').onclick = function () {
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    };
+    document.getElementById('mo-diag-again').onclick = function () { collect(); render(null); netTest(); };
+  }
+
+  function netTest() {
+    var box = document.getElementById('mo-diag-net');
+    if (!box) return;
+    try {
+      if (!window.mo || !window.mo.net) { box.textContent = '联网测试：window.mo.net 不存在（兼容层未就绪）'; return; }
+      var t0 = Date.now();
+      window.mo.net({ url: 'https://www.baidu.com', charset: 'auto' }).then(function (r) {
+        box.textContent = '联网测试：HTTP ' + (r && r.status) + '  ' + ((r && r.text || '').length) + ' 字符  ' + (Date.now() - t0) + 'ms';
+      }, function (e) {
+        box.textContent = '联网测试：失败 → ' + ((e && e.message) || e);
+      });
+    } catch (e) { box.textContent = '联网测试：异常 → ' + (e && e.message || e); }
+  }
+
+  window.__moreadDiag = function (note) {
+    try { collect(); render(note || null); netTest(); }
+    catch (e) { alert('自检自身出错：' + (e && e.message || e)); }
+  };
+
+  // 兼容层没起来就自动弹，避免「界面好好的但什么都用不了」这种无声失败
+  window.setTimeout(function () {
+    if (!window.mo) {
+      window.__moreadDiag('兼容层未就绪（window.mo 不存在），界面已渲染但所有功能不可用。下面是自检结果，请截图发给我。');
+    }
+  }, 2500);
+
+  // 长按顶栏也能手动打开
+  function bindLongPress() {
+    var bar = document.getElementById('titlebar');
+    if (!bar) return;
+    var timer = null;
+    function start() { timer = window.setTimeout(function () { window.__moreadDiag(null); }, 1200); }
+    function cancel() { if (timer) { window.clearTimeout(timer); timer = null; } }
+    bar.addEventListener('touchstart', start, false);
+    bar.addEventListener('touchend', cancel, false);
+    bar.addEventListener('touchmove', cancel, false);
+    bar.addEventListener('mousedown', start, false);
+    bar.addEventListener('mouseup', cancel, false);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindLongPress);
+  else bindLongPress();
+})();
+</script>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
