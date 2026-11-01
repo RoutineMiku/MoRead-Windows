@@ -7,7 +7,8 @@
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   /* 安卓版：bridge.js 会把 Node 兼容层挂到 window.MoNative 上 */
-  const IS_ANDROID = !!window.MoNative;
+  /* 网页版桌面浏览器（MoNativeBridge.__isWebDesktop）跑桌面版式，不算安卓形态 */
+  const IS_ANDROID = !!window.MoNative && !(window.MoNativeBridge && window.MoNativeBridge.__isWebDesktop);
   const layoutMode = () => document.documentElement.getAttribute('data-layout') || '';
 
   const S = {
@@ -290,8 +291,16 @@
     window.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; dz.classList.remove('on'); } });
     window.addEventListener('drop', async e => {
       e.preventDefault(); depth = 0; dz.classList.remove('on');
-      const files = [...(e.dataTransfer.files || [])].map(f => f.path).filter(Boolean);
-      if (files.length) doImport(files);
+      const list = [...(e.dataTransfer.files || [])];
+      const files = list.map(f => f.path).filter(Boolean);   // Electron：File 带真实路径
+      if (files.length) { doImport(files); return; }
+      /* 浏览器里 File 没有 path：交给网页桥读进虚拟文件系统再导入 */
+      const wb = window.MoNativeBridge;
+      if (list.length && wb && wb.__stageFiles) {
+        const items = await wb.__stageFiles(list);
+        const paths = (items || []).filter(i => !i.error && i.path).map(i => i.path);
+        if (paths.length) doImport(paths);
+      }
     });
   }
 
@@ -792,8 +801,10 @@
    *   抓 HTML → Engine 本地嗅探 → 只给「这页能不能读 / 有哪些书」的结论，一键入书架。
    * 桌面端仍走 <webview>，两边互不影响。 */
   function isAndroidApp() {
-    return typeof window.MoNativeBridge !== 'undefined' ||
-      document.documentElement.classList.contains('is-android');
+    if (typeof window.MoNativeBridge !== 'undefined') {
+      return !window.MoNativeBridge.__isWebDesktop;   // 网页版桌面浏览器按桌面处理
+    }
+    return document.documentElement.classList.contains('is-android');
   }
 
   const WA = { built: false, stack: [], busy: false, lastUrl: '' };
@@ -1796,6 +1807,8 @@
             <div class="switch ${s.autoCacheNext ? 'on' : ''}" data-set="autoCacheNext"><i></i></div></div>
           <div class="row"><div class="rl">数据目录<small>${esc(S.info.paths.root)}</small></div>
             ${IS_ANDROID ? '' : '<button class="link" id="open-dir">打开</button>'}</div>
+          ${S.info.platform === 'web' ? `<div class="row"><div class="rl">书源代理地址<small>网页版默认不发起任何网络请求（数据不出设备）。填入你自部署的代理服务后可用在线书源与搜书；留空只能读本地书</small></div>
+            <input class="inp" id="web-proxy" value="${esc((() => { try { return localStorage.getItem('moread.proxy') || ''; } catch (e) { return ''; } })())}" placeholder="https://你的代理地址/?url=" spellcheck="false" /></div>` : ''}
         </div>
 
         <div class="card">
@@ -1861,7 +1874,7 @@
 
         <div class="card" style="grid-column:1/-1">
           <h3>关于</h3>
-          <div class="row"><div class="rl">版本<small>${IS_ANDROID ? `墨读 ${esc(S.info.version)} · Android` : `墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}`}</small></div>
+          <div class="row"><div class="rl">版本<small>${IS_ANDROID ? `墨读 ${esc(S.info.version)} · Android` : (S.info.platform === 'web' ? `墨读 ${esc(S.info.version)} · 网页版` : `墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}`)}</small></div>
             <span class="rv">${IS_ANDROID ? '数据只存本机' : (S.info.portable ? '便携模式 · 数据在程序目录' : '数据只存本地')}</span></div>
           <div class="row"><div class="rl">数据位置<small>${esc(S.info.paths.root)}</small></div>
             ${IS_ANDROID ? '' : '<button class="link" id="open-dir2">打开</button>'}</div>
@@ -1898,8 +1911,13 @@
       s[k] = !s[k]; el.classList.toggle('on', s[k]); save(true);
     });
     /* 安卓没有「文件管理器」可跳转，这两个按钮根本不会渲染出来，要判空 */
-    if ($('#open-dir')) $('#open-dir').onclick = () => mo.openDir();
-    if ($('#open-dir2')) $('#open-dir2').onclick = () => mo.openDir();
+    if ($('#open-dir')) $('#open-dir').onclick = () => mo.openDir && mo.openDir();
+    if ($('#open-dir2')) $('#open-dir2').onclick = () => mo.openDir && mo.openDir();
+    /* 网页版：书源代理地址（存 localStorage，由浏览器桥的 http 层读取） */
+    if ($('#web-proxy')) $('#web-proxy').onchange = () => {
+      try { localStorage.setItem('moread.proxy', $('#web-proxy').value.trim()); } catch (e) { }
+      toast($('#web-proxy').value.trim() ? '代理已保存，下个请求开始生效' : '已清空代理：回到纯本地模式');
+    };
     $('#s-tts').onclick = () => ttsPanel();
     $('#s-tts-test').onclick = () => {
       const v = ttsOrderedVoices().find(x => x.voiceURI === ttsCfg().voiceURI) || ttsOrderedVoices()[0];

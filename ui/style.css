@@ -641,7 +641,9 @@ html[data-layout="portrait"] .tb-title{
 html[data-layout="portrait"] .tb-actions{margin-left:0;gap:0;}
 html[data-layout="portrait"] .tb-btn{width:42px;height:42px;}
 
-html[data-layout="portrait"] .page-head{padding:10px 14px 8px;gap:8px;flex-wrap:nowrap;align-items:center;}
+html[data-layout="portrait"] .page-head{padding:10px 14px 8px;gap:6px 8px;flex-wrap:wrap;align-items:center;}
+/* 计数不许被搜索框挤成一列竖字：让它独占一行 */
+html[data-layout="portrait"] .page-head .sub{flex:1 1 100%;order:9;}
 html[data-layout="portrait"] .page-head h1{display:none;}
 html[data-layout="portrait"] .page-head .sub{
   padding-bottom:0;font-size:12px;min-width:0;line-height:1.45;

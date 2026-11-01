@@ -10,7 +10,10 @@
     "start": "electron .",
     "pack": "node build/pack.js",
     "dist": "node build/pack.js",
-    "test": "node test/test-backup.js"
+    "test": "node test/test-backup.js",
+  "web": "node build/gen-web.js",
+  "web:serve": "node build/gen-web.js && node build/serve-web.js",
+  "web:deploy": "node build/gen-web.js && node web/deploy-pages.js"
   },
   "devDependencies": {
     "electron": "^45.0.0",

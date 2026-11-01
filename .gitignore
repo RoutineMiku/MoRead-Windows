@@ -3,6 +3,7 @@ node_modules/
 
 # 打包产物（含 Electron 运行时，单个 zip 就 200MB+，走 GitHub Releases）
 dist/
+dist-web/
 
 # 运行时数据 / 截图临时产物
 data/

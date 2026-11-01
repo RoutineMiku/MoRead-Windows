@@ -9,8 +9,43 @@
 **下载**（都在本仓库 [Releases](https://github.com/RoutineMiku/MoRead-Windows/releases)）：
 - Windows：`MoRead-win32-x64.zip`，解压后双击 `墨读.exe` 即可，免安装、不写注册表、数据跟着程序走
 - 安卓：[`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.4.1-android/MoRead-android.apk)，直接安装（WebView 内置 Node 兼容层，桌面/安卓共用同一套阅读与书源逻辑）
+- 网页版（iOS / iPad / 任意浏览器）：**<https://routinemiku.github.io/MoRead-Windows/>** — 免安装、免账号，iPhone 上用 Safari 打开后「分享 → 添加到主屏幕」，就得到全屏独立图标
 
 ![书架](docs/screenshots/shot_shelf.png)
+
+## 网页版（iOS / iPad / 浏览器）
+
+同一套 `ui/` + `src/` 代码跑在浏览器里，原生能力由 `web/bridge-web.js` 顶替（安卓是 Kotlin 的 `MoBridge`）：
+
+| 能力 | 实现 |
+| --- | --- |
+| 数据存储 | IndexedDB 虚拟文件系统（书架 / 进度 / 章节缓存 / 本地书全文），**只存在这台设备上**，不上传任何服务器 |
+| 本地书 | 点「导入本地书」选 txt / epub；桌面浏览器还可以直接把文件拖进窗口 |
+| 在线书源 | 需自填代理（浏览器 CORS 限制，见下）；不填则完全不发起网络请求 |
+| 朗读 | 浏览器自带 `speechSynthesis` |
+| 离线 | Service Worker 缓存应用外壳，断网也能打开和读已导入的书 |
+
+**为什么要自填代理**：浏览器出于安全不允许网页直接抓任意网站，书源请求必须经一个转发端点。为了让数据不经过作者的服务器，这里**不内置任何代理**，由使用者在自己的 Cloudflare Workers（免费额度每天 10 万次）里部署一个十来行的转发：
+
+```js
+export default {
+  async fetch(req) {
+    const u = new URL(req.url).searchParams.get('url');
+    if (!u) return new Response('missing url', { status: 400 });
+    const r = await fetch(u, { headers: { 'user-agent': 'Mozilla/5.0' } });
+    return new Response(r.body, {
+      status: r.status,
+      headers: { 'access-control-allow-origin': '*', 'content-type': r.headers.get('content-type') || 'text/plain' }
+    });
+  }
+};
+```
+
+部署后把地址（形如 `https://xxx.workers.dev/?url=`）填进「设置 → 书源代理地址」即可。留空 = 纯本地模式。
+
+**注意**：网页版数据存在浏览器里，清理「网站数据」/ 无痕模式会连同书架一起清掉；重要书籍建议用设置里的「导出备份 zip」留一份。
+
+本地开发：`npm run web`（生成 `dist-web/`）→ `npm run web:serve`（<http://127.0.0.1:8099/> 预览）→ `GH_TOKEN=... npm run web:deploy`（发布到 GitHub Pages）。
 
 ## 运行 · Windows
 
