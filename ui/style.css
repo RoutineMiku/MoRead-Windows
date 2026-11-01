@@ -275,7 +275,32 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 .reader-stage{flex:1;overflow-y:auto;overflow-x:hidden;background:var(--r-bg);color:var(--r-text);}
 .page{max-width:730px;margin:0 auto;padding:48px 40px 110px;user-select:text;}
 .reader.mode-paged .reader-stage{overflow:hidden;}
-.reader.mode-paged .page{padding:40px 40px 40px;}
+/* 翻页模式：正文按「书页」铺满阅读区。
+   左右标点边距 = max(26px, (可用宽 - 一行上限)/2)，--page-max 由 applyReaderStyle 按字号算出
+   （约 58 字/行），窄屏自动退化成满宽，宽屏只留适度白边，避免长行难读。
+   JS 分页时读的就是这里的 computed padding，所以测量值与实际渲染必然一致。 */
+.reader.mode-paged .page{
+  max-width:none;width:100%;overflow:hidden;
+  padding-block:30px 38px;
+  padding-inline:max(26px, calc((100% - var(--page-max, 1100px)) / 2));
+}
+.reader.mode-paged .page h2{font-size:27px;margin:9px 0 26px;}
+/* 手机横屏（高度很矮）时压缩上下留白，否则一页只放得下两行 */
+@media (max-height: 520px){
+  .reader.mode-paged .page{padding-block:14px 16px;}
+  .reader.mode-paged .page h2{font-size:22px;margin:6px 0 14px;}
+  .reader.mode-paged .page .ch-no{font-size:11px;}
+  .reader.mode-paged .page .end{margin-top:18px;}
+  /* 横屏时顶栏底栏能吃掉一半屏高（420px 的机器只剩 211px 给正文）。
+     底栏第二行是字号 / 字体 / 主题 / 朗读，这些在「设置」页里都有，横屏先收起换阅读面积。
+     注意要带 html[data-layout] 前缀，否则比触摸热区那组 44px 规则的特异性低，压不住。 */
+  html[data-layout] .rb-row2{display:none;}
+  html[data-layout] .reader-top{height:calc(44px + var(--sa-top));flex-basis:calc(44px + var(--sa-top));}
+  html[data-layout] .rb-btn{min-height:34px;height:34px;padding:0 9px;font-size:12px;}
+  html[data-layout] .reader-bot{padding-top:3px;padding-bottom:calc(5px + var(--sa-bottom));}
+  .reader-top .rtitle{font-size:13px;}
+  .swatches .sw{width:18px;height:18px;}
+}
 .page .ch-no{font-size:11.5px;letter-spacing:2.5px;color:var(--r-dim);text-align:center;}
 .page h2{font-family:var(--serif);font-size:25px;text-align:center;margin:9px 0 32px;font-weight:600;letter-spacing:2px;line-height:1.5;}
 .page .body p{

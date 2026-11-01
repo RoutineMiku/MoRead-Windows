@@ -1499,7 +1499,7 @@
             <button data-v="sans" class="${s.fontFamily === 'sans' ? 'on' : ''}">黑体</button></div></div>
           <div class="row"><div class="rl">翻页方式</div>
             <div class="seg" id="s-mode"><button data-v="scroll" class="${s.pageMode === 'scroll' ? 'on' : ''}">滚动</button>
-            <button data-v="paged" class="${s.pageMode === 'paged' ? 'on' : ''}">分页</button></div></div>
+            <button data-v="paged" class="${s.pageMode === 'paged' ? 'on' : ''}">翻页</button></div></div>
         </div>
 
         <div class="card">
@@ -1606,7 +1606,7 @@
     $$('#s-mode button').forEach(b => b.onclick = () => {
       $$('#s-mode button').forEach(x => x.classList.remove('on'));
       b.classList.add('on'); s.pageMode = b.dataset.v; save();
-      if (R.book) { $('#r-mode').textContent = s.pageMode === 'paged' ? '分页' : '滚动'; renderChapter(); }
+      if (R.book) { $('#r-mode').textContent = s.pageMode === 'paged' ? '翻页' : '滚动'; renderChapter(); }
     });
     $$('#s-conc button').forEach(b => b.onclick = () => {
       $$('#s-conc button').forEach(x => x.classList.remove('on'));
@@ -1938,7 +1938,7 @@
     const s = S.state.settings;
     $('#reader').dataset.theme = s.theme;
     $$('#r-swatches .sw').forEach(el => el.classList.toggle('on', el.dataset.t === s.theme));
-    $('#r-mode').textContent = s.pageMode === 'paged' ? '分页' : '滚动';
+    $('#r-mode').textContent = s.pageMode === 'paged' ? '翻页' : '滚动';
     $('#r-font').textContent = s.fontFamily === 'serif' ? '宋体' : '黑体';
     $('#r-fs-num').textContent = s.fontSize;
   }
@@ -1950,11 +1950,19 @@
     page.style.setProperty('--r-fs', s.fontSize + 'px');
     page.style.setProperty('--r-lh', s.lineHeight);
     page.style.setProperty('--para-gap', (s.paraGap ? (s.lineHeight > 1.9 ? 1.05 : .8) : .2) + 'em');
+    /* 分页模式一行最多约 58 字：字号变大时书页跟着变宽，超宽屏也不会拉成一条长行 */
+    page.style.setProperty('--page-max', Math.round(s.fontSize * 58) + 'px');
     page.classList.toggle('nofamily', s.fontFamily !== 'serif');
     $('#reader').classList.toggle('mode-paged', s.pageMode === 'paged');
     $('#r-fs-num').textContent = s.fontSize;
     $('#r-font').textContent = s.fontFamily === 'serif' ? '宋体' : '黑体';
-    $('#r-mode').textContent = s.pageMode === 'paged' ? '分页' : '滚动';
+    $('#r-mode').textContent = s.pageMode === 'paged' ? '翻页' : '滚动';
+    /* 分页时底栏翻的是页，不是章 —— 文案跟着模式走，免得以为一下跳一章 */
+    const prev = $('#r-prev'), next = $('#r-next');
+    if (prev) prev.textContent = s.pageMode === 'paged' ? '上一页' : '上一章';
+    if (next) next.textContent = s.pageMode === 'paged' ? '下一页' : '下一章';
+    if (prev) prev.title = s.pageMode === 'paged' ? '上一页（← / PageUp）' : '上一章';
+    if (next) next.title = s.pageMode === 'paged' ? '下一页（→ / PageDown / 空格）' : '下一章';
   }
 
   async function openReader(bookId, ci, pct) {
@@ -2099,21 +2107,30 @@
     const b = R.book;
     const s = S.state.settings;
     const page = $('#r-page');
-    const head = `<div class="ch-no">${esc(b.name)} · 共 ${b.total || '?'} 章</div><h2>${esc(R.title)}</h2>`;
-    const tail = `<div class="end">本章完</div>`;
 
     if (s.pageMode === 'paged') {
       layoutPages();
       const ps = R.pages[R.page] || [];
-      page.innerHTML = head + `<div class="body">${ps.map(p => `<p>${esc(p)}</p>`).join('')}</div>` +
-        (R.page === R.pages.length - 1 ? tail : '');
+      /* 首页显示书名 + 章节名，之后的书页只留一行轻页眉 —— 与 layoutPages 里的
+         测量模板保持一致，否则每页可用高度算多了，正文会溢出到页外 */
+      page.innerHTML = pageHeadHtml(R.page === 0) +
+        `<div class="body">${ps.map(p => `<p>${esc(p)}</p>`).join('')}</div>`;
+      if (R.page === R.pages.length - 1) {
+        page.insertAdjacentHTML('beforeend', pageTailHtml());
+        const st = $('#r-stage');
+        /* 「本章完」是装饰，放不下就省掉：宁可少一句提示，也不能让它把正文顶出屏幕 */
+        if (st && page.getBoundingClientRect().height > st.clientHeight + 2 && page.lastElementChild) {
+          page.removeChild(page.lastElementChild);
+        }
+      }
       page.classList.remove('slide-l', 'slide-r');
       void page.offsetWidth;
       page.classList.add(dir > 0 ? 'slide-l' : dir < 0 ? 'slide-r' : 'pageturn');
       $('#r-stage').scrollTop = 0;
       $('#r-pagenum').textContent = `${R.page + 1}/${R.pages.length} 页`;
     } else {
-      page.innerHTML = head + `<div class="body">${R.paras.map(p => `<p>${esc(p)}</p>`).join('')}</div>` + tail;
+      const head = `<div class="ch-no">${esc(b.name)} · 共 ${b.total || '?'} 章</div><h2>${esc(R.title)}</h2>`;
+      page.innerHTML = head + `<div class="body">${R.paras.map(p => `<p>${esc(p)}</p>`).join('')}</div>` + pageTailHtml();
       page.classList.remove('pageturn');
       void page.offsetWidth;
       page.classList.add('pageturn');
@@ -2123,45 +2140,175 @@
     applyReaderStyle();
   }
 
-  /** 按当前可视高度把段落切成一页页 */
-  function layoutPages() {
-    const stage = $('#r-stage');
-    const s = S.state.settings;
-    const availH = stage.clientHeight - 96; // 上下内边距（分页模式 page padding 40+40）+ 余量
-    const width = Math.min(730, stage.clientWidth) - 80;
+  /** 按当前阅读区尺寸把章节切成一页页。
+   *   1) 宽 / 高 / 边距全部实测，不写死 730px —— 翻页时正文会铺满整个阅读区
+   *   2) 超长段落用 Range 二分按可视高度从中间截断，不会整段溢出到页外
+   *   3) 结果按「影响排版的因子」缓存，翻页本身不再重复排版 */
+  let pagedKey = '', pagedPages = null;
 
-    const meas = document.createElement('div');
-    meas.className = 'page';
-    meas.style.cssText = `position:absolute;left:-9999px;top:0;width:${width}px;padding:0;margin:0;max-width:none;visibility:hidden;`;
-    meas.style.setProperty('--r-fs', s.fontSize + 'px');
-    meas.style.setProperty('--r-lh', s.lineHeight);
-    meas.style.setProperty('--para-gap', (s.paraGap ? (s.lineHeight > 1.9 ? 1.05 : .8) : .2) + 'em');
-    meas.classList.toggle('nofamily', s.fontFamily !== 'serif');
-    const bodyEl = document.createElement('div');
-    bodyEl.className = 'body';
-    meas.appendChild(bodyEl);
-    document.body.appendChild(meas);
+  function pageHeadHtml(first) {
+    const b = R.book || {};
+    return first
+      ? `<div class="ch-no">${esc(b.name || '')} · 共 ${b.total || '?'} 章</div><h2>${esc(R.title || '')}</h2>`
+      : `<div class="ch-no">${esc(b.name || '')} · ${esc(R.title || '')}</div>`;
+  }
+  function pageTailHtml() { return `<div class="end">本章完</div>`; }
+
+  function measPadV(s) {
+    return (s.paraGap ? (s.lineHeight > 1.9 ? 1.05 : .8) : .2) + 'em';
+  }
+  function layoutPages(force) {
+    const stage = $('#r-stage'), page = $('#r-page');
+    const s = S.state.settings;
+    if (!stage || !page) return;
+    /* 先确保 mode-paged 已生效，否则量到的是滚动模式的宽度 */
+    $('#reader').classList.toggle('mode-paged', true);
+
+    const cs = getComputedStyle(page);
+    const padTop = parseFloat(cs.paddingTop) || 0;
+    const padBottom = parseFloat(cs.paddingBottom) || 0;
+    const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    const availW = Math.max(240, Math.round((page.clientWidth || stage.clientWidth) - padX));
+
+    const boxStyle = `position:absolute;left:-9999px;top:0;visibility:hidden;pointer-events:none;` +
+      `width:${availW + padX}px;padding:${padTop}px ${parseFloat(cs.paddingRight) || 0}px ${padBottom}px ${parseFloat(cs.paddingLeft) || 0}px;` +
+      `max-width:none;margin:0;`;
+    const mk = inner => {
+      const d = document.createElement('div');
+      d.className = 'page' + (s.fontFamily !== 'serif' ? ' nofamily' : '');
+      d.style.cssText = boxStyle;
+      d.style.setProperty('--r-fs', s.fontSize + 'px');
+      d.style.setProperty('--r-lh', s.lineHeight);
+      d.style.setProperty('--para-gap', measPadV(s));
+      d.innerHTML = inner;
+      document.body.appendChild(d);
+      return d;
+    };
+
+    /* ---- 第一步：量出「一页能装多少正文」 ----
+     * 不再用「页眉高 + 页脚高」逐项相减：末页「本章完」的 margin、段落 margin 是否
+     * collapse 出去都算不准，窄高屏上会差出十几二十像素。直接把一页只放页眉的空壳
+     * 渲染出来量 offsetHeight，误差为零。首页有书名和章节标题，单独量一份。
+     *
+     * 这里刻意**不**为「本章完」预留高度：它只出现在末页，每页都留一块等于白扔两三行，
+     * 横屏下肉眼可见一大片空白。末页放不下时由渲染层决定省略它（见 renderChapter）。 */
+    const baseOf = first => {
+      const d = mk(pageHeadHtml(first) + '<div class="body"></div>');
+      const h = d.offsetHeight;
+      document.body.removeChild(d);
+      return h;
+    };
+    const baseNext = baseOf(false);
+    const baseFirst = baseOf(true);
+
+    const availH = Math.max(80, Math.round(stage.clientHeight - baseNext));
+    /* 首页要多扣「书名 + 章节标题」比一行页眉多出来的高度 */
+    const firstPenalty = Math.max(0, Math.round(baseFirst - baseNext));
+    const key = [availW, availH, firstPenalty, s.fontSize, s.lineHeight, s.fontFamily, s.paraGap ? 1 : 0,
+      R.paras.length, R.ci, (R.book || {}).id, R.title].join('|');
+    if (!force && key === pagedKey && pagedPages) {
+      R.pages = pagedPages;
+      R.page = clamp(R.page, 0, R.pages.length - 1);
+      return;
+    }
+
+    /* ---- 第二步：逐段排版分页 ---- */
+    const box = mk('');
+    const bEl = document.createElement('div');
+    bEl.className = 'body';
+    box.appendChild(bEl);
+    const mb = el => parseFloat(getComputedStyle(el).marginBottom) || 0;
+    /** 二分找「前 n 个字」正好还在 maxH 高度内的最大 n */
+    const fitOffset = (node, maxH, len) => {
+      const rg = document.createRange();
+      rg.setStart(node, 0);
+      const fits = i => { rg.setEnd(node, i); return rg.getBoundingClientRect().height <= maxH; };
+      if (fits(len)) return len;
+      let lo = 1, hi = len, best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (fits(mid)) { best = mid; lo = mid + 1; } else hi = mid - 1;
+      }
+      return best;
+    };
 
     const pages = [[]];
-    let used = 0;
-    for (const p of R.paras) {
-      const el = document.createElement('p');
-      el.textContent = p;
-      bodyEl.appendChild(el);
-      const h = el.offsetHeight + parseFloat(getComputedStyle(el).marginBottom || 0);
-      if (used + h > availH && pages[pages.length - 1].length) {
-        pages.push([p]);
-        used = h;
-        bodyEl.innerHTML = '';
-        bodyEl.appendChild(el);
-      } else {
-        pages[pages.length - 1].push(p);
-        used += h;
+    /* 首页先扣掉标题占的高度，后续页从 0 开始 */
+    let cur = 0, used = firstPenalty;
+    for (const para of R.paras) {
+      let rest = para;
+      let guard = 0;
+      while (rest && guard++ < 400) {
+        bEl.innerHTML = '';
+        const el = document.createElement('p');
+        el.textContent = rest;
+        bEl.appendChild(el);
+        const full = el.offsetHeight + mb(el);
+        if (used + full <= availH + 0.5) {          // 整段放得下
+          pages[cur].push(rest);
+          used += full;
+          break;
+        }
+        if (pages[cur].length) {                     // 本页已有内容 → 先翻页再试
+          pages.push([]); cur = pages.length - 1; used = 0;
+          continue;
+        }
+        /* 空页也放不下：按剩余高度从行中间截断 */
+        const node = el.firstChild;
+        let off = node ? fitOffset(node, availH, rest.length) : 0;
+        if (off <= 0) { pages[cur].push(rest); used = availH; break; }  // 高度不足一行，硬放避免死循环
+        /* 落点在标点上时顺延一个字，免得下一页首行以标点开头 */
+        if (off < rest.length && /[，。！？；：、）】》」』…—]/.test(rest[off])) off += 1;
+        pages[cur].push(rest.slice(0, off));
+        rest = rest.slice(off);
+        pages.push([]); cur = pages.length - 1; used = 0;
       }
     }
-    if (!pages[pages.length - 1].length && pages.length > 1) pages.pop();
-    document.body.removeChild(meas);
-    R.pages = pages.length ? pages : [[]];
+    if (pages.length > 1 && !pages[pages.length - 1].length) pages.pop();
+    document.body.removeChild(box);
+
+    /* ---- 第三步：逐页实测兜底 ----
+     * 上面靠「页眉/页脚高度估算」算可用高度，窄高屏上仍可能差几十像素（末页的
+     * 「本章完」还带一段上外边距），内容会顶出屏幕底部。这里用「高度锁死为阅读区高度」
+     * 的探针真实排版每一页，超出就把末尾段落挪到下一页。
+     *
+     * 两道保险，缺一不可（踩过：没有上限时页面只有一段却永远装不下，会不停新建空白页，
+     * 直接把 WebView 卡死）：单页只剩一段就认输；总移动次数给个预算。 */
+    if (pages.length) {
+      const probe = mk('');
+      try {
+        probe.style.height = stage.clientHeight + 'px';
+        probe.style.overflow = 'hidden';
+        const overOf = (arr, first, last) => {
+          probe.innerHTML = pageHeadHtml(first) + '<div class="body"></div>' + (last ? pageTailHtml() : '');
+          const b = probe.querySelector('.body');
+          b.innerHTML = arr.map(t => `<p>${esc(t)}</p>`).join('');
+          return probe.scrollHeight - probe.clientHeight;
+        };
+        let budget = Math.max(30, pages.length * 6);
+        const maxPages = pages.length * 2 + 3;
+        for (let i = 0; i < pages.length && budget > 0; i++) {
+          while (budget-- > 0) {
+            const isLast = i === pages.length - 1;
+            if (overOf(pages[i], i === 0, isLast) <= 0) break;
+            if (pages[i].length <= 1) break;      // 只剩一段还装不下：宁可它满页，也不再推
+            if (pages.length >= maxPages) break;
+            const t = pages[i].pop();
+            if (!pages[i + 1]) pages.push([]);
+            pages[i + 1].unshift(t);
+          }
+        }
+      } catch (e) {
+        console.error('分页兜底失败：', e);
+      } finally {
+        if (probe.parentNode) probe.parentNode.removeChild(probe);
+      }
+      if (pages.length > 1 && !pages[pages.length - 1].length) pages.pop();
+    }
+
+    pagedPages = pages.length ? pages : [[]];
+    pagedKey = key;
+    R.pages = pagedPages;
     R.page = clamp(R.page, 0, R.pages.length - 1);
   }
 
@@ -2594,16 +2741,79 @@
     $('#r-tts').onclick = () => { if (R.tts) stopTTS(); else startTTS(0); };
     $('#r-tts-set').onclick = ttsPanel;
     $('#r-switch').onclick = () => switchSource();
-    $('#r-stage').addEventListener('scroll', () => updateProgress());
-    $('#r-stage').addEventListener('click', e => {
-      if (e.target.closest('p')) return;
-      // 点击两侧翻页
-      const x = e.clientX - $('#r-stage').getBoundingClientRect().left;
-      if (x < 80) turnPageOrChapter(-1);
-      else if (x > $('#r-stage').clientWidth - 80) turnPageOrChapter(1);
+    const stageEl = $('#r-stage');
+    const isPaged = () => S.state.settings.pageMode === 'paged';
+    /* 触摸滑动翻页后浏览器还会补一个 click，别让它再翻一页 */
+    let swipedAt = 0;
+
+    stageEl.addEventListener('scroll', () => updateProgress());
+    stageEl.addEventListener('click', e => {
+      /* 只在「点到正文」时才算翻页手势。这里绝不能写成 closest('p') —— 正文铺满了整个屏幕，
+         那样等于把左右两侧的翻页热区全废掉，手指怎么点都没反应（桌面合成事件 target 是容器，
+         所以自动化测试反而看不出来）。按钮/目录/底栏这些可交互元素仍然排除。 */
+      if (e.target.closest('a,button,input,textarea,select,.toc,.rb-btn')) return;
+      if (!isPaged()) return;
+      if (Date.now() - swipedAt < 450) return;
+      /* 有选中的文字（长按选词 / 拖动选择）时不翻页。这里直接看当前选区，
+         不要用「touchstart 时记一个标记」那种写法：鼠标点击、脚本点击不会触发
+         touchstart，标记会一直残留，把下一次点击吃掉。 */
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && String(sel).trim().length > 0) return;
+      // 点击左右两侧翻页：热区随阅读区宽度自适应，手机上约占 2/9 屏宽
+      const r = stageEl.getBoundingClientRect();
+      const zone = Math.max(56, Math.min(130, r.width * 0.22));
+      const x = e.clientX - r.left;
+      if (x < zone) turnPageOrChapter(-1);
+      else if (x > r.width - zone) turnPageOrChapter(1);
     });
+
+    /* 桌面：滚轮（含触控板）翻页，带节流免得惯性一下翻好几页 */
+    let wheelAt = 0;
+    stageEl.addEventListener('wheel', e => {
+      if (!isPaged()) return;                       // 滚动模式交回浏览器原生滚动
+      e.preventDefault();
+      const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+      if (!d) return;
+      if (Date.now() - wheelAt < 170) return;
+      wheelAt = Date.now();
+      turnPageOrChapter(d > 0 ? 1 : -1);
+    }, { passive: false });
+
+    /* 触摸：横向轻扫翻页。竖向滑动不拦，留给手指做别的（如滚动目录） */
+    let tX = 0, tY = 0, tT = 0, tracking = false;
+    stageEl.addEventListener('touchstart', e => {
+      if (!isPaged() || e.touches.length !== 1) { tracking = false; return; }
+      tracking = true;
+      tX = e.touches[0].clientX; tY = e.touches[0].clientY; tT = Date.now();
+    }, { passive: true });
+    stageEl.addEventListener('touchend', e => {
+      if (!tracking) return;
+      tracking = false;
+      if (!isPaged() || !e.changedTouches.length) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - tX, dy = t.clientY - tY;
+      if (Date.now() - tT > 900) return;                              // 长按不算滑动
+      if (Math.abs(dx) < 42 || Math.abs(dx) < Math.abs(dy) * 1.4) return; // 竖直滑动忽略
+      swipedAt = Date.now();
+      turnPageOrChapter(dx < 0 ? 1 : -1);                             // 左滑看下一页
+    }, { passive: true });
+
+    /* 窗口尺寸 / 横竖屏变化：重排后按原进度比例落到对应页，而不是跳回本章第 1 页 */
+    let rzT = 0;
     window.addEventListener('resize', () => {
-      if (R.book && S.state.settings.pageMode === 'paged') { R.page = 0; renderChapter(0); }
+      if (!R.book || S.state.settings.pageMode !== 'paged') return;
+      clearTimeout(rzT);
+      rzT = setTimeout(() => {
+        if (!R.book || S.state.settings.pageMode !== 'paged') return;
+        const before = R.pages.length;
+        const ratio = before > 1 ? R.page / (before - 1) : 0;
+        pagedKey = '';                       // 强制按新尺寸重排
+        renderChapter(0);
+        if (before > 1 && R.pages.length > 1) {
+          R.page = clamp(Math.round(ratio * (R.pages.length - 1)), 0, R.pages.length - 1);
+          renderChapter(0);
+        }
+      }, 120);
     });
   }
 
@@ -2627,6 +2837,12 @@
         case 'ArrowRight': case 'PageDown': e.preventDefault(); turnPageOrChapter(1); break;
         case 'ArrowUp': if (S.state.settings.pageMode === 'scroll') { $('#r-stage').scrollBy({ top: -260, behavior: 'smooth' }); e.preventDefault(); } break;
         case 'ArrowDown': if (S.state.settings.pageMode === 'scroll') { $('#r-stage').scrollBy({ top: 260, behavior: 'smooth' }); e.preventDefault(); } break;
+        case ' ':                                    // 空格：分页模式下翻页，滚动模式翻屏
+          if (typing) break;
+          e.preventDefault();
+          if (S.state.settings.pageMode === 'paged') turnPageOrChapter(e.shiftKey ? -1 : 1);
+          else $('#r-stage').scrollBy({ top: e.shiftKey ? -window.innerHeight * 0.85 : window.innerHeight * 0.85, behavior: 'smooth' });
+          break;
         case '+': case '=': $('#r-fs-up').click(); break;
         case '-': $('#r-fs-down').click(); break;
         case 't': case 'T': {
