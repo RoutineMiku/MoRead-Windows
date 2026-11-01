@@ -45,6 +45,8 @@ export default {
 
 **注意**：网页版数据存在浏览器里，清理「网站数据」/ 无痕模式会连同书架一起清掉；重要书籍建议用设置里的「导出备份 zip」留一份。
 
+<img src="docs/screenshots/web/web_phone_shelf.png" width="300" alt="网页版手机书架" /> <img src="docs/screenshots/web/web_desktop_shelf.png" width="520" alt="网页版桌面书架" />
+
 本地开发：`npm run web`（生成 `dist-web/`）→ `npm run web:serve`（<http://127.0.0.1:8099/> 预览）→ `GH_TOKEN=... npm run web:deploy`（发布到 GitHub Pages）。
 
 ## 运行 · Windows
