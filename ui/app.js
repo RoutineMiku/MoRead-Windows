@@ -9,6 +9,8 @@
   /* 安卓版：bridge.js 会把 Node 兼容层挂到 window.MoNative 上 */
   /* 网页版桌面浏览器（MoNativeBridge.__isWebDesktop）跑桌面版式，不算安卓形态 */
   const IS_ANDROID = !!window.MoNative && !(window.MoNativeBridge && window.MoNativeBridge.__isWebDesktop);
+  /* 浏览器里跑的版本（手机/电脑都算）：没有"文件路径"、没有拖放，交互要更明确一些 */
+  const IS_WEB = !!(window.MoNativeBridge && window.MoNativeBridge.__isWeb);
   const layoutMode = () => document.documentElement.getAttribute('data-layout') || '';
 
   const S = {
@@ -389,9 +391,30 @@
         <button class="del" data-del="${b.id}" title="移出书架">×</button>
         <button class="more" data-menu="${b.id}" title="更多（分组 / 更新目录）">⋯</button>
       </div>`;
-    }).join('') || `<div class="empty" style="grid-column:1/-1">书架还是空的。<br>${isAndroidApp()
-      ? '点右上角 <b>导入</b> 选手机里的 txt / epub，或去「书源」搜网络小说。'
-      : '拖入 TXT / EPUB，或去「书源」搜索网络小说。'}</div>`;
+    }).join('') || (IS_WEB
+      ? `<div class="empty web-start" style="grid-column:1/-1">
+          <b>书架还是空的</b>
+          <p>书、书源、阅读进度都存在你这台设备的浏览器里，不会上传到任何服务器。</p>
+          <div class="web-start-btns">
+            <button class="btn primary" data-start="import">导入本地书（TXT / EPUB）</button>
+            <button class="btn" data-start="restore">从备份文件恢复</button>
+            <button class="btn" data-start="source">去书源找网络小说</button>
+          </div>
+          <p class="web-start-tip">换设备、或清理过浏览器数据后，用「从备份文件恢复」把书架和进度找回来。</p>
+        </div>`
+      : `<div class="empty" style="grid-column:1/-1">书架还是空的。<br>${isAndroidApp()
+        ? '点右上角 <b>导入</b> 选手机里的 txt / epub，或去「书源」搜网络小说。'
+        : '拖入 TXT / EPUB，或去「书源」搜索网络小说。'}</div>`);
+
+    /* 网页版空书架的三个入口 */
+    $$('#books [data-start]').forEach(btn => {
+      btn.onclick = () => {
+        const k = btn.dataset.start;
+        if (k === 'import') importBooks();
+        else if (k === 'restore') restoreFromZip();
+        else if (k === 'source') setView('web');
+      };
+    });
 
     $$('#books .book').forEach(el => {
       el.onclick = e => {
@@ -1813,9 +1836,12 @@
 
         <div class="card">
           <h3>备份与恢复 <span class="chip">含 Legado 格式</span></h3>
+          ${S.info.platform === 'web' ? `<div class="web-note">
+            数据只存在这台设备的浏览器里。清理浏览器数据、换手机、或用无痕模式打开都会丢，
+            建议每隔一阵点一次「完整导出」，把 zip 存到手机文件或网盘里。</div>` : ''}
           <div class="row"><div class="rl">导出备份 zip<small>内含 bookSource.json / bookshelf.json / bookmark.json，原版「阅读」可直接导入这个 zip</small></div>
             <button class="btn sm" id="bk-zip">导出</button></div>
-          <div class="row"><div class="rl">完整备份（含本地书文件）<small>换电脑能完整还原，体积更大</small></div>
+          <div class="row"><div class="rl">完整备份（含本地书文件）<small>换设备能完整还原，本地书的正文也在里面${S.info.platform === 'web' ? '——网页版推荐用这个' : ''}</small></div>
             <button class="btn sm" id="bk-zip-full">完整导出</button></div>
           <div class="row"><div class="rl">从备份恢复<small>支持墨读 zip、原版阅读备份 zip、单个书源 JSON</small></div>
             <button class="btn sm" id="bk-restore">选择文件</button></div>
@@ -2048,7 +2074,14 @@
 
   async function restoreFromZip() {
     const r = await mo.pickZip();
-    if (!r.ok) { if (r.error) toast(r.error); return; }
+    if (!r.ok) {
+      if (r.error) {
+        const more = /不是有效的 ZIP|没有识别到书源|读取失败|无法读取/.test(r.error)
+          ? '（支持：墨读备份 .zip、原版「阅读」的备份 .zip、书源 .json）' : '';
+        toast(r.error + more);
+      }
+      return;
+    }
     showRestoreConfirm(r);
   }
 
@@ -2085,7 +2118,24 @@
       S.state = res.state;
       applySettings();
       closeModal(); renderShelf(); setView('shelf');
-      return toast('恢复完成');
+      const n = (res.state.books || []).length;
+      const miss = Number(res.missingLocal) || 0;
+      if (miss > 0) {
+        /* 这份备份没带本地书正文：书名和进度回来了，但点开是空的。
+           不说清楚的话，用户只会觉得"恢复了但读不了"。 */
+        openModal(`<h3>恢复了 ${n} 本书</h3>
+          <p class="desc">书架和阅读进度都在。不过有 <b>${miss} 本本地书</b>没带上原文件——
+          这份备份是「不含本地书」的版本，正文需要重新导入原 txt / epub 才能读。</p>
+          <p class="desc">下次导出时选 <b>「完整备份（含本地书文件）」</b>，就能连正文一起带走。</p>
+          <div class="modal-actions">
+            <button class="btn left" id="rs-reimport">去导入原文件</button>
+            <button class="btn primary" onclick="window.__closeModal()">知道了</button>
+          </div>`);
+        const btn = $('#rs-reimport');
+        if (btn) btn.onclick = () => { closeModal(); setView('shelf'); importBooks(); };
+        return;
+      }
+      return toast(`已恢复 ${n} 本书、${(res.state.sources || []).length} 个书源`);
     }
     // Legado 备份
     const counts = applyLegado(r.legado || {}, mode);

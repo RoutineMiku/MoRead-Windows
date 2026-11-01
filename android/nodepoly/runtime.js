@@ -869,7 +869,22 @@
       if (!book) return { ok: false, error: '书籍不存在' };
       const chapters = loadParsed(book);
       const ch = chapters[idx];
-      if (!ch) return { ok: false, error: '章节不存在' };
+      if (!ch) {
+        if (chapters.length) return { ok: false, error: '章节不存在' };
+        /* 目录都没有：多半是正文文件不在（比如恢复的是「不含本地书」的备份，
+           或者换设备后没把原文件带过来）。直接说清楚，别只回一句「章节不存在」。 */
+        let hasFile = false;
+        try {
+          const raw = book.localFile ? store.readLocalFile(book.localFile) : null;
+          hasFile = !!(raw && raw.length);
+        } catch (e) { hasFile = false; }
+        return {
+          ok: false,
+          error: hasFile
+            ? '这本书解析不出章节，可能文件损坏，建议重新导入原文件'
+            : '这本书的正文文件不在了（常见于恢复「不含本地书」的备份）。用「导入」重新选一次原 txt / epub 即可继续读'
+        };
+      }
       return { ok: true, title: ch.title, text: ch.text, total: chapters.length };
     },
     deleteBookFiles: bookId => {
@@ -980,22 +995,37 @@
       if (parsed.kind !== 'moread') return { ok: false, error: '这不是墨读完整备份' };
       try {
         const s = store.restoreBackup(parsed.payload, mode);
+        let restoredLocal = 0;
         if (parsed.payload.fileMap) {
           const files = legado.readZipFiles(pendingZip.buffer, parsed.payload.fileMap);
           for (const id of Object.keys(files)) {
             const book = s.books.find(b => b.id === id);
             if (!book) continue;
             const info = parsed.payload.fileMap[id] || {};
-            const b64 = files[id] instanceof Uint8Array ? bytesToB64(files[id]) : null;
-            if (!b64) continue;
-            book.localFile = store.writeLocalBook(id, info.ext || book.ext || '.txt', b64);
+            const raw = files[id];
+            if (!raw) continue;
+            // 必须把字节交给 writeLocalBook：早先这里转成 base64 字符串再写，
+            // fs shim 会把字符串按 utf8 落盘，本地书就变成一堆 base64 文本，打开全是乱码。
+            const buf = raw instanceof Uint8Array ? raw : Buf.from(raw);
+            book.localFile = store.writeLocalBook(id, info.ext || book.ext || '.txt', buf);
             book.ext = info.ext || book.ext || '.txt';
+            restoredLocal++;
           }
           store.saveNow();
         }
         parsedCache.clear();
         pendingZip = null;
-        return { ok: true, state: s };
+        /* 备份里没带本地书文件（导出时没选「完整备份」）时，书架上书名进度都在，
+           点开正文却是空的。数一下缺几本，让界面直说。
+           注意：手机/网页版的 fs shim 读不到文件时不抛错，而是回一个空 buffer，
+           所以这里必须连长度一起判断，不能只判 null。 */
+        let missingLocal = 0;
+        for (const b of s.books || []) {
+          if (b.kind !== 'local') continue;
+          const raw = b.localFile ? store.readLocalFile(b.localFile) : null;
+          if (!raw || !raw.length) missingLocal++;
+        }
+        return { ok: true, state: s, restoredLocal, missingLocal };
       } catch (e) { return { ok: false, error: e.message }; }
     },
     testImportZip: async file => {
