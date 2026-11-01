@@ -932,15 +932,64 @@
     return out.slice(0, 60);
   }
 
+  /**
+   * 搜索引擎结果页专用的链接抽取。
+   *
+   * 通用 sniffLinks 取的是「整条结果」的锚文本，而必应在同一个 <a> 里既放标题又放 cite
+   * （baidu.com + https://baike.baidu.com › item），标题就变成了域名；百度/搜狗/360
+   * 又各自用了不同的容器。这里按各家结果条的标题节点取，标题干净、地址也准。
+   */
+  function autoSerpLinks(root, baseUrl) {
+    /* 只在搜索站上动手。小说站的目录页偶尔也会命中 .result h3 a 这种通用选择器，
+       一旦误判成「搜索页」，同域链接（也就是章节）会被全部滤掉，反而更糟。 */
+    let host = '';
+    try { host = new URL(baseUrl).host.replace(/^www\./, ''); } catch (e) { return []; }
+    if (!/(^|\.)(bing|baidu|sogou|so|google|zhihu|sm|yandex|duckduckgo)\.(com|cn|net)$/.test(host)) return [];
+    const out = [];
+    const seen = new Set();
+    const push = (title, href) => {
+      const t = String(title || '').replace(/\s+/g, ' ').trim();
+      if (!t || t.length > 90) return;
+      if (!href || href === '#' || /^javascript:/i.test(href)) return;
+      const url = absUrl(baseUrl, href);
+      if (!/^https?:/.test(url)) return;
+      if (seen.has(url)) return;
+      seen.add(url);
+      out.push({ title: t, url });
+    };
+    /* 各家的结果标题节点。h2 a 覆盖必应，h3 a 覆盖百度/搜狗/360/谷歌 */
+    const sels = [
+      '#b_results li.b_algo h2 a',
+      '.b_algo h2 a',
+      '#content_left .result h3 a',
+      '#content_left .c-container h3 a',
+      '.result-op h3 a',
+      '.vrwrap h3 a',
+      '.res-list h3 a',
+      '.result h3 a',
+      '#rso .g h3 a',
+      '[data-testid="result"] h2 a'
+    ];
+    for (const s of sels) {
+      for (const a of root.querySelectorAll(s)) push(a.textContent, a.getAttribute('href'));
+      if (out.length >= 5) break;
+    }
+    return out.slice(0, 40);
+  }
+
   /** 一次性分析页面 */
   function detectPage(html, baseUrl) {
     const root = doc(html);
     const info = autoInfo(root);
     const toc = autoToc(root, baseUrl);
     const content = autoContent(root);
+    const serp = autoSerpLinks(root, baseUrl);
     return {
       info, toc, content,
-      links: sniffLinks(root, baseUrl),
+      /* 搜索页用专用抽取：通用抽取拿到的是「整条结果」的锚文本，
+         里面混着 cite 的域名，标题会变成 baidu.com 这种鬼东西 */
+      links: serp.length >= 3 ? serp : sniffLinks(root, baseUrl),
+      serp: serp.length >= 3,
       title: (root.title || '').trim()
     };
   }

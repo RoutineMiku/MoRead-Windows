@@ -272,7 +272,8 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 .icbtn.on{color:var(--accent);background:rgba(43,108,224,.1);}
 .icbtn svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}
 
-.reader-stage{flex:1;overflow-y:auto;overflow-x:hidden;background:var(--r-bg);color:var(--r-text);}
+/* position:relative：让章节段的 offsetTop 直接等于滚动内容坐标（连续阅读按它判定章节归属） */
+.reader-stage{flex:1;overflow-y:auto;overflow-x:hidden;background:var(--r-bg);color:var(--r-text);position:relative;}
 .page{max-width:730px;margin:0 auto;padding:48px 40px 110px;user-select:text;}
 .reader.mode-paged .reader-stage{overflow:hidden;}
 /* 翻页模式：正文按「书页」铺满阅读区。
@@ -310,6 +311,14 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 .page.nofamily .body p{text-indent:0;font-family:var(--ui);}
 .page .end{margin-top:40px;text-align:center;color:var(--r-dim);font-size:12.5px;letter-spacing:2px;font-family:var(--serif);}
 .page .err{color:#c05a4d;text-align:center;padding:40px 0;font-size:13px;line-height:2;}
+/* 加载失败时「重试 / 换源」并排，手机上也不会挤成一条 */
+.page .err-act{display:flex;gap:10px;justify-content:center;align-items:center;margin-top:16px;flex-wrap:wrap;}
+.page .err-act .btn{min-width:96px;justify-content:center;}
+/* 滚动模式连续阅读：缓冲区里相邻章节之间的衔接（只在滚动模式存在 .ch-sec） */
+.page .ch-sec + .ch-sec{margin-top:3.4em;padding-top:2.2em;position:relative;}
+.page .ch-sec + .ch-sec::before{content:'';position:absolute;top:0;left:18%;right:18%;border-top:1px solid var(--r-dim);opacity:.3;}
+.page .buf-err{margin:2.4em auto 1.2em;text-align:center;color:var(--r-dim);font-size:12.5px;line-height:2;padding:0 20px;}
+.page .buf-err .btn{min-width:84px;justify-content:center;padding:4px 14px;font-size:12.5px;margin-left:8px;}
 .pageturn{animation:turn .26s ease;}
 @keyframes turn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
 .page.slide-l{animation:sl .26s ease;}
@@ -528,20 +537,20 @@ html[data-layout]{
 /* ---- 屏幕圆角避让：贴边的那一圈控件都要让开 ---- */
 /* 竖屏：底部导航左右两角 */
 html[data-layout="portrait"] .rail{
-  padding-left:max(2px, calc(var(--corner-bl) * .7));
-  padding-right:max(2px, calc(var(--corner-br) * .7));
+  padding-left:max(2px, calc(var(--corner-bl) * .35));
+  padding-right:max(2px, calc(var(--corner-br) * .35));
 }
 /* 横屏 / 展开态：左侧栏上下两角 */
 html[data-layout="landscape"] .rail,
 html[data-layout="wide"] .rail{
-  padding-top:max(10px, calc(var(--corner-tl) * .6));
+  padding-top:max(8px, calc(var(--corner-tl) * .4));
 }
 /* 竖屏底部导航七个入口：让开圆角后仍要一排放得下 */
 html[data-layout="portrait"] .rail-btn{min-width:40px;}
 /* 悬浮按钮、吐司也别压在圆角上 */
 html[data-layout="landscape"] .toast,
 html[data-layout="wide"] .toast{bottom:calc(24px + var(--sa-bottom));}
-html[data-layout] .rg-tools{padding-right:max(10px, calc(var(--corner-br) * .6));}
+html[data-layout] .rg-tools{padding-right:max(10px, calc(var(--corner-br) * .35));}
 html[data-layout] body{
   -webkit-tap-highlight-color:rgba(43,108,224,.12);
   /* 别让 WebView 自作主张缩放文字，否则横竖屏切换时字号会变 */
@@ -549,7 +558,9 @@ html[data-layout] body{
   /* 桌面版 14px 是给鼠标 + 一臂距离看的，手机上偏小，整体抬一档 */
   font-size:15px;
 }
-html[data-layout] .app{height:100%;padding-top:var(--sa-top);}
+/* 安全区交给顶栏自己吸收：padding-top 加在 .app 上会让状态栏那一条露出另一层背景，
+   看起来就像「顶上莫名空了一大块」；加进 titlebar 里，背景是连续的。 */
+html[data-layout] .app{height:100%;padding-top:0;}
 html[data-layout] .winbtns{display:none;}          /* 安卓没有自绘窗口按钮 */
 html[data-layout] .dropzone{display:none!important;}
 /* 去掉双击缩放带来的 300ms 点击延迟，顺手让点击反馈即时 */
@@ -562,9 +573,12 @@ html[data-layout] .rb-btn,
 html[data-layout] .card{touch-action:manipulation;}
 /* 顶部应用栏：给状态栏留位，去掉桌面版的拖拽语义 */
 html[data-layout] .titlebar{
-  height:var(--appbar);flex:0 0 var(--appbar);
-  /* 左右让开屏幕圆角，不然品牌区和按钮会被 R 角切掉 */
-  padding:0 max(8px, var(--corner-tr)) 0 max(14px, var(--corner-tl));
+  height:calc(var(--appbar) + var(--sa-top));
+  flex:0 0 calc(var(--appbar) + var(--sa-top));
+  box-sizing:border-box;
+  /* 左右让开屏幕圆角，不然品牌区和按钮会被 R 角切掉。
+     只让开圆角的一半左右：全让开（--corner 就是 60px）会把品牌区挤到屏幕中间 */
+  padding:var(--sa-top) max(8px, calc(var(--corner-tr) * .5)) 0 max(12px, calc(var(--corner-tl) * .5));
   background:rgba(255,255,255,.9);border-bottom:1px solid rgba(0,0,0,.06);
   -webkit-app-region:no-drag;
 }
@@ -615,18 +629,69 @@ html[data-layout="portrait"] .rail-btn:hover{background:transparent;color:#5c647
 html[data-layout="portrait"] .rail-btn.active{background:transparent;color:var(--accent);box-shadow:none;}
 html[data-layout="portrait"] .rail-btn.active svg{stroke-width:2;}
 
-/* 竖屏下页面内边距收紧 */
-html[data-layout="portrait"] .page-head{padding:12px 14px 10px;gap:10px;flex-wrap:wrap;}
-html[data-layout="portrait"] .page-head h1{font-size:18px;}
-html[data-layout="portrait"] .head-tools{margin-left:0;width:100%;}
-html[data-layout="portrait"] .searchbox{width:auto;flex:1;height:40px;}
-html[data-layout="portrait"] .grid{grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:16px 12px;padding:0 14px 8px;}
-html[data-layout="portrait"] .shelf-head{padding:0 14px;}
+/* 竖屏：顶栏已经有页面标题了，页面内不再重复一遍大标题（原来「墨读」+「书架」
+   两行叠在一起，顶部 140px 全是标题） */
+html[data-layout="portrait"]{--appbar:50px;}
+html[data-layout="portrait"] .bname{display:none;}
+html[data-layout="portrait"] .tb-title{
+  display:block;flex:1;min-width:0;margin:0;padding:0;border:none;
+  font-size:17px;font-weight:650;color:var(--text);letter-spacing:.2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+html[data-layout="portrait"] .tb-actions{margin-left:0;gap:0;}
+html[data-layout="portrait"] .tb-btn{width:42px;height:42px;}
+
+html[data-layout="portrait"] .page-head{padding:10px 14px 8px;gap:8px;flex-wrap:nowrap;align-items:center;}
+html[data-layout="portrait"] .page-head h1{display:none;}
+html[data-layout="portrait"] .page-head .sub{
+  padding-bottom:0;font-size:12px;min-width:0;line-height:1.45;
+  /* 只给一行的话，书源页那句「已检测 3：优质 1 / 有效 1 / 较差 1 / 无用 0」必被截断，
+     留两行刚好够，再长才省略 */
+  white-space:normal;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+}
+html[data-layout="portrait"] .head-tools{margin-left:auto;width:auto;flex:0 1 auto;}
+html[data-layout="portrait"] .searchbox{width:auto;flex:1 1 auto;height:40px;min-width:0;}
+html[data-layout="portrait"] .head-tools .btn{padding:0 12px;white-space:nowrap;}
+
+/* 书卡三列：96px 起步会挤成五列，书名只剩两个字，点也点不准 */
+html[data-layout="portrait"] .grid{grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:16px 11px;padding:0 14px 8px;}
+/* 分组 tabs 和「全/本地/在线」共 6 个控件，393px 宽一行塞不下：分组被压成「+ 分」。
+   改成两行 —— 分组占满第一行（可横滑），范围筛选靠右放第二行。 */
+html[data-layout="portrait"] .shelf-head{margin:12px 0 8px;padding:0 14px;gap:6px 8px;flex-wrap:wrap;}
+html[data-layout="portrait"] .shelf-head .tabs{flex:1 1 100%;min-width:0;max-width:none;flex-wrap:nowrap;
+  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+html[data-layout="portrait"] .shelf-head .tabs::-webkit-scrollbar{display:none;}
+html[data-layout="portrait"] .shelf-head .line{display:none;}
+html[data-layout="portrait"] .shelf-head .seg{margin-left:auto;}
+/* 分组按钮不许被压缩，否则「＋ 新分组」只剩「＋ 分」 */
+html[data-layout] .tabs > button{flex:0 0 auto;white-space:nowrap;}
+/* 393px 宽的机器上五个分组按钮刚好差 30px 放不下，收一点内边距就不用滑了 */
+html[data-layout="portrait"] .tabs > button{padding:5px 7px;}
+html[data-layout="portrait"] .tabs > button .cnt{margin-left:3px;}
+html[data-layout="portrait"] .seg{flex:0 0 auto;}
+html[data-layout="portrait"] .seg button{padding:5px 9px;white-space:nowrap;}
 html[data-layout="portrait"] .stat-grid{grid-template-columns:repeat(2,1fr);padding:2px 14px 12px;}
 html[data-layout="portrait"] .chart-card{margin:0 14px 14px;}
 html[data-layout="portrait"] .drop-hint{padding:0 20px 18px;}
 html[data-layout="portrait"] .segmented,
 html[data-layout="portrait"] .toolbar{overflow-x:auto;}
+
+/* 设置项：说明文字原来用 break-all，会在单词中间硬断（「…导入这个 z / ip」）。
+   手机上右侧还有按钮，改用 anywhere：只在真的放不下时才断，且不拆散单词。 */
+html[data-layout="portrait"] .row{align-items:flex-start;gap:10px;padding:11px 0;}
+html[data-layout="portrait"] .row .rl small{word-break:normal;overflow-wrap:anywhere;line-height:1.5;}
+html[data-layout="portrait"] .row > .rv,
+html[data-layout="portrait"] .row > .seg,
+html[data-layout="portrait"] .row > .btn{flex:0 0 auto;}
+html[data-layout="portrait"] input[type=range]{width:min(42vw,150px);}
+
+/* 带输入框的设置项（WebDAV 地址/账号/密码）：说明文字 + 230px 输入框横着塞不下，
+   左侧说明会被压成一字一行（截图里「服务器地址」竖排到底）。改成上下两行。 */
+html[data-layout] .row:has(> .inp){flex-wrap:wrap;gap:6px;}
+html[data-layout] .row:has(> .inp) > .rl{flex:1 1 100%;}
+html[data-layout] .row:has(> .inp) > .inp{flex:1 1 100%;width:100%;height:40px;font-size:14px;}
+/* 不支持 :has 的老 WebView 兜底：说明区至少留 5 个字宽，至少不会一个字一行 */
+html[data-layout] .row > .rl{min-width:5.5em;}
 
 /* 横屏 / 展开态：内容区收紧一点，利用好横向空间 */
 html[data-layout="landscape"] .grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:18px 14px;padding:0 20px 8px;}
@@ -652,6 +717,29 @@ html[data-layout="portrait"] .toast{bottom:calc(96px + var(--sa-bottom));}
 html[data-layout] .reader-top{padding:calc(var(--sa-top)) 12px 0;height:calc(54px + var(--sa-top));flex-basis:calc(54px + var(--sa-top));}
 html[data-layout] body.is-full .reader-top{height:calc(48px + var(--sa-top));flex-basis:calc(48px + var(--sa-top));}
 html[data-layout] .reader-bot{padding-bottom:calc(8px + var(--sa-bottom));}
+
+/* ---- 沉浸阅读（手机）：进书默认全屏，顶/底栏滑出屏幕，点中间唤出 ----
+   bars-off 时顶/底栏脱离文档流（absolute），阅读区真正铺满整屏；
+   唤回时回到文档流，transform/opacity 只做离场动画。 */
+html[data-layout] #reader .reader-top,
+html[data-layout] #reader .reader-bot{transition:transform .22s ease, opacity .22s ease;}
+html[data-layout] #reader.bars-off .reader-top{
+  position:absolute;top:0;left:0;right:0;z-index:8;
+  transform:translateY(-105%);opacity:0;pointer-events:none;
+}
+html[data-layout] #reader.bars-off .reader-bot{
+  position:absolute;bottom:0;left:0;right:0;z-index:8;
+  transform:translateY(110%);opacity:0;pointer-events:none;
+}
+/* 沉浸时正文自己让开状态栏和手势条（分页排版读的是 computed padding，会自动重排） */
+html[data-layout] #reader.bars-off .page{
+  padding-top:max(34px, var(--sa-top));
+  padding-bottom:max(96px, calc(var(--sa-bottom) + 72px));
+}
+
+/* 滚动模式整章一口气渲染：让浏览器跳过屏外段落的排版与绘制，长章滑动不卡。
+   只限定在 #reader 里且非翻页模式 —— 分页的离屏测量盒挂在 body 下，不能被波及。 */
+#reader:not(.mode-paged) .page .body p{content-visibility:auto;contain-intrinsic-size:auto 3.2em;}
 html[data-layout="portrait"] .page{padding:26px 18px 96px;max-width:100%;}
 html[data-layout="portrait"] .page h2{font-size:22px;margin:8px 0 24px;}
 html[data-layout="portrait"] .rb-row{gap:7px;}
@@ -675,8 +763,8 @@ html[data-layout] .rg-tools{padding-bottom:calc(10px + var(--sa-bottom));}
 /* ---------------- 竖屏大屏（平板 / 折叠屏展开后竖向握持） ----------------
  * 导航仍在底部——竖向握持时底部比侧边顺手；只是把栅格放宽、正文居中限宽，
  * 免得 800dp 宽的屏幕上还挤着三列卡片、一行字拉到一百多个字。 */
-html[data-layout="portrait"][data-sw="medium"] .grid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr));}
-html[data-layout="portrait"][data-sw="expanded"] .grid{grid-template-columns:repeat(auto-fill,minmax(124px,1fr));}
+html[data-layout="portrait"][data-sw="medium"] .grid{grid-template-columns:repeat(auto-fill,minmax(158px,1fr));}
+html[data-layout="portrait"][data-sw="expanded"] .grid{grid-template-columns:repeat(auto-fill,minmax(168px,1fr));}
 /* 七个入口在大屏上别被拉得太宽，居中收一收 */
 html[data-layout="portrait"][data-sw="medium"] .rail-btn,
 html[data-layout="portrait"][data-sw="expanded"] .rail-btn{max-width:104px;}
@@ -745,3 +833,104 @@ html[data-layout="landscape"] .rail-gap{flex:1 1 0;min-height:0;}
   html[data-layout="landscape"] .rail-btn svg{width:20px;height:20px;flex:0 0 20px;}
   html[data-layout="landscape"] .rail-gap{display:none;}
 }
+
+/* ==================================================================
+ * 手机端网页搜书（抓取式）
+ * 安卓 WebView 里没有 Electron 的 <webview>，所以手机端不嵌浏览器：
+ * 抓回 HTML 本地嗅探，只呈现「这页能不能读」和可点的链接。
+ * 全部带 html[data-layout] 前缀，桌面版（没有该属性）完全不受影响。
+ * ================================================================== */
+html[data-layout] #view-web{overflow:hidden;}
+html[data-layout] .wa-bar{display:flex;gap:8px;align-items:center;padding:10px 14px 8px;flex:0 0 auto;}
+html[data-layout] .wa-input{
+  flex:1;min-width:0;height:42px;border-radius:11px;border:1px solid var(--line);background:#fff;
+  padding:0 12px;font-size:15px;box-shadow:var(--shadow-sm);outline:none;color:var(--text);
+}
+html[data-layout] .wa-input:focus{border-color:#bcd2f6;box-shadow:0 0 0 3px rgba(43,108,224,.12);}
+html[data-layout] .wa-bar .btn{flex:0 0 auto;height:42px;padding:0 16px;border-radius:11px;font-size:14px;}
+html[data-layout] .wa-tools{display:flex;gap:8px;align-items:center;padding:0 14px 10px;flex:0 0 auto;}
+/* 还没搜过的时候不显示灰着的「← 返回」，省得占地方又像坏掉了 */
+html[data-layout] .wa-tools #wa-back[disabled]{display:none;}
+html[data-layout] .wa-tools #wa-back{margin-left:auto;}
+html[data-layout] .wa-engine{
+  height:34px;border-radius:9px;border:1px solid var(--line);background:#fff;
+  font-size:13px;padding:0 6px;color:var(--text);
+}
+html[data-layout] .wa-tools .btn{height:34px;}
+html[data-layout] .wa-tools #wa-back{margin-left:auto;}
+html[data-layout] .wa-tools #wa-back[disabled]{opacity:.4;}
+html[data-layout] .wa-list{
+  flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;padding:0 14px calc(20px + var(--sa-bottom));
+}
+html[data-layout] .wa-home{padding:24px 2px;color:var(--muted);font-size:13.5px;line-height:1.7;}
+html[data-layout] .wa-home-t{font-size:17px;font-weight:650;color:var(--text);margin-bottom:8px;}
+html[data-layout] .wa-home-s{margin-bottom:10px;}
+html[data-layout] .wa-home-li{margin-top:5px;color:var(--faint);font-size:12.5px;}
+html[data-layout] .wa-src{font-size:12px;color:var(--faint);padding:4px 2px 8px;word-break:break-all;}
+html[data-layout] .wa-card{
+  background:#fff;border:1px solid var(--line);border-radius:13px;padding:14px 15px;
+  box-shadow:var(--shadow-sm);margin-bottom:14px;
+}
+html[data-layout] .wa-card.ok{border-color:#cfe0fb;background:linear-gradient(180deg,#f7faff,#fff);}
+html[data-layout] .wa-card-t{font-size:15.5px;font-weight:650;color:var(--text);line-height:1.45;}
+html[data-layout] .wa-card-s{font-size:12.5px;color:var(--muted);margin-top:5px;}
+html[data-layout] .wa-card-bad .wa-card-s{color:var(--faint);}
+html[data-layout] .wa-card-a{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+html[data-layout] .wa-card-a .btn{height:38px;padding:0 16px;border-radius:10px;}
+html[data-layout] .wa-label{font-size:12px;color:var(--faint);margin:2px 2px 8px;}
+html[data-layout] .wa-items{display:flex;flex-direction:column;gap:8px;}
+html[data-layout] .wa-item{
+  display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;
+  background:#fff;border:1px solid var(--line);border-radius:11px;padding:12px 13px;
+  box-shadow:var(--shadow-sm);transition:.12s;
+}
+html[data-layout] .wa-item:active{background:#f2f6fd;transform:scale(.995);}
+html[data-layout] .wa-item-t{
+  font-size:14.5px;font-weight:550;color:var(--text);line-height:1.45;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+html[data-layout] .wa-item-u{font-size:11.5px;color:var(--faint);}
+html[data-layout] .wa-loading{display:flex;align-items:center;gap:10px;padding:28px 4px;color:var(--muted);font-size:13.5px;}
+html[data-layout] .wa-loading i{
+  width:18px;height:18px;border-radius:50%;border:2px solid #dfe5ee;border-top-color:var(--accent);
+  animation:spin .8s linear infinite;flex:0 0 18px;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* 列表类容器在手机上要有惯性滚动，不然一停就死 */
+html[data-layout] .view,
+html[data-layout] .list,
+html[data-layout] .modal{-webkit-overflow-scrolling:touch;}
+
+/* 触摸设备上没有 hover：删除/更多按钮原来只在 :hover 时 display:grid，
+   手机上永远点不到 —— 常显一个 ⋯，删除等操作收进弹出的菜单里。 */
+html[data-layout] .book .more{
+  /* 放左上角：封面右侧是竖排书名，压在上面会把书名挡掉一半 */
+  display:grid;left:6px;right:auto;top:6px;width:26px;height:26px;font-size:14px;line-height:1;
+  background:rgba(255,255,255,.92);border-color:rgba(0,0,0,.06);color:#4d5563;
+}
+html[data-layout] .book .del{display:none;}
+html[data-layout] .book .more:active{background:#eef2f8;}
+
+/* ---------------- 竖屏：工具条与卡片不再和文字抢宽度 ----------------
+ * 书源/设置里的工具条原来是「一行硬塞 + 横向滚动」，手机上按钮、下拉、
+ * 统计文字会互相挤，URL 只剩半截。改成允许换行、卡片按钮落到下一行。 */
+html[data-layout] .src-toolbar,
+html[data-layout] .tb-group,
+html[data-layout] .form-actions{
+  overflow:visible;flex-wrap:wrap;row-gap:8px;
+}
+html[data-layout="portrait"] .src-toolbar .tb-select{flex:1 1 calc(50% - 5px);max-width:none;min-width:0;}
+html[data-layout="portrait"] .src-toolbar .tb-count{flex:0 0 auto;order:9;margin-left:auto;}
+html[data-layout="portrait"] .src-toolbar .tb-spacer{display:none;}
+html[data-layout="portrait"] .row-card{flex-wrap:wrap;gap:10px 12px;padding:12px 13px;}
+html[data-layout="portrait"] .row-card .body{flex:1 1 calc(100% - 52px);min-width:0;}
+html[data-layout="portrait"] .row-card .s{
+  white-space:normal;overflow-wrap:anywhere;line-height:1.5;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+html[data-layout="portrait"] .row-card .act{width:100%;justify-content:flex-end;gap:8px;}
+html[data-layout="portrait"] .row-card .act .btn{min-height:36px;padding:0 12px;}
+html[data-layout="portrait"] .src-url{white-space:normal;overflow-wrap:anywhere;}
+html[data-layout="portrait"] .src-rules{flex-wrap:wrap;row-gap:6px;}

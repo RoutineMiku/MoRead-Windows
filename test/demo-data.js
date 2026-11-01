@@ -82,7 +82,7 @@ const mkOnline = (id, name, author, total, intro) => ({
 const state = {
   version: 2,
   books: [
-    { id: 'L1', name: '山居笔记', author: '顾野', kind: 'local', total: 5, ext: '.txt', localFile: 'books/L1.txt', groupId: 'g_default', intro: '一段回到山里的日子。', createdAt: now - 40 * day, updatedAt: now },
+    { id: 'L1', name: '山居笔记', author: '顾野', kind: 'local', total: 6, ext: '.txt', localFile: 'books/L1.txt', groupId: 'g_default', intro: '一段回到山里的日子。', createdAt: now - 40 * day, updatedAt: now },
     mkOnline('O1', '星海拾遗', '苏白', 642, '天文台守夜人捡到一本来自星海的笔记。'),
     mkOnline('O2', '云麓旧事', '林知遥', 380, '云麓镇三代人的旧账本与旧情分。'),
     mkOnline('O3', '灯下拾光集', '陈屿', 214, '夜班编辑在灯下拾起的散碎时光。'),

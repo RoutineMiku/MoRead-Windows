@@ -66,12 +66,12 @@
   }
 
   let toastTimer = null;
-  function toast(msg) {
+  function toast(msg, ms) {
     const t = $('#toast');
     t.textContent = msg;
     t.classList.add('on');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('on'), 2400);
+    toastTimer = setTimeout(() => t.classList.remove('on'), ms || 2400);
   }
 
   function openModal(html, wide) {
@@ -87,7 +87,15 @@
   let saveTimer = null;
   function save(now) {
     clearTimeout(saveTimer);
-    const run = () => mo.state.set(S.state).catch(e => console.error(e));
+    /* mo.state.set 在桌面端是 IPC（返回 Promise），安卓端是同步写盘（返回值不是 Promise）。
+       直接 .catch() 在手机上会抛 "catch is not a function"，把调用它的整段逻辑带走——
+       导入后书架不刷新、设置改完不生效，都是被这里炸掉的。 */
+    const run = () => {
+      try {
+        const r = mo.state.set(S.state);
+        if (r && typeof r.catch === 'function') r.catch(e => console.error(e));
+      } catch (e) { console.error(e); }
+    };
     if (now) run(); else saveTimer = setTimeout(run, 700);
   }
 
@@ -100,6 +108,13 @@
     try { bindNav(); } catch (e) { console.error('bindNav 失败：', e); }
     try { renderShelf(); } catch (e) { console.error('renderShelf 失败：', e); }
     try { setView('shelf'); } catch (e) { console.error('setView 失败：', e); }
+    /* 手机上「把文件拖进窗口」这句话没有意义，换成手指能照做的说明 */
+    try {
+      const dh = $('.drop-hint');
+      if (dh && isAndroidApp()) {
+        dh.innerHTML = '点右上角 <b>导入</b> 选择 txt / epub 文件；在线书在「书源」里搜索后加入书架';
+      }
+    } catch (e) { /* 文案改不了不影响功能 */ }
 
     // 系统语音是异步加载的，加载完刷新一下设置页上的音色名
     try {
@@ -224,10 +239,17 @@
 
   async function doImport(paths) {
     toast('正在解析 ' + paths.length + ' 个文件…');
-    const results = await mo.importLocal(paths);
+    let results;
+    try {
+      results = (await mo.importLocal(paths)) || [];
+    } catch (e) {
+      toast('导入失败：' + (e.message || e), 4200);
+      return;
+    }
+    const errs = [], names = [];
     let ok = 0;
     for (const r of results) {
-      if (r.error) { toast(r.error); continue; }
+      if (r.error) { errs.push(r.error); continue; }
       const exists = S.state.books.find(b => b.name === r.name && b.kind === 'local');
       if (exists) {
         // 同名的直接覆盖内容
@@ -241,11 +263,22 @@
           createdAt: Date.now(), updatedAt: Date.now()
         });
       }
-      ok++;
+      ok++; names.push(r.name);
     }
     save(true);
     renderShelf();
-    toast(ok ? `已导入 ${ok} 本` : '没有可导入的文件');
+    /* 失败原因必须留在屏幕上：以前这里只报「没有可导入的文件」，
+       真实的解析错误被后一条 toast 盖掉，看起来像是点了没反应。 */
+    if (errs.length) {
+      const head = ok > 0 ? `已导入 ${ok} 本，${errs.length} 个失败` : '导入失败';
+      toast(head + '：' + errs[0] + (errs.length > 1 ? `（共 ${errs.length} 个）` : ''), 5200);
+    } else if (ok === 1) {
+      toast(`已导入《${names[0]}》`);
+    } else if (ok > 1) {
+      toast(`已导入 ${ok} 本`);
+    } else {
+      toast('没有可导入的文件');
+    }
   }
 
   function bindDropZone() {
@@ -347,7 +380,9 @@
         <button class="del" data-del="${b.id}" title="移出书架">×</button>
         <button class="more" data-menu="${b.id}" title="更多（分组 / 更新目录）">⋯</button>
       </div>`;
-    }).join('') || `<div class="empty" style="grid-column:1/-1">书架还是空的。<br>拖入 TXT / EPUB，或去「书源」搜索网络小说。</div>`;
+    }).join('') || `<div class="empty" style="grid-column:1/-1">书架还是空的。<br>${isAndroidApp()
+      ? '点右上角 <b>导入</b> 选手机里的 txt / epub，或去「书源」搜网络小说。'
+      : '拖入 TXT / EPUB，或去「书源」搜索网络小说。'}</div>`;
 
     $$('#books .book').forEach(el => {
       el.onclick = e => {
@@ -360,6 +395,24 @@
         e.preventDefault();
         bookMenu(el.dataset.id);
       };
+      /* 手机上既没有 hover 也没有右键：长按 500ms 弹菜单，
+         手指一挪动就取消，免得滑动列表时误触。 */
+      if (isAndroidApp()) {
+        let timer = null, sx = 0, sy = 0;
+        el.addEventListener('pointerdown', e => {
+          if (e.pointerType === 'mouse') return;
+          sx = e.clientX; sy = e.clientY;
+          clearTimeout(timer);
+          timer = setTimeout(() => { timer = null; bookMenu(el.dataset.id); }, 500);
+        });
+        const cancel = e => {
+          if (e && (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8)) clearTimeout(timer);
+          clearTimeout(timer); timer = null;
+        };
+        el.addEventListener('pointerup', cancel);
+        el.addEventListener('pointercancel', cancel);
+        el.addEventListener('pointermove', cancel);
+      }
     });
     $$('#books [data-del]').forEach(btn => btn.onclick = async e => {
       e.stopPropagation();
@@ -639,6 +692,7 @@
   }
 
   function renderWeb() {
+    if (isAndroidApp()) return renderWebMobile();
     const v = $('#view-web');
     if (WEB.built) { updateWebNav(); return; }
 
@@ -729,6 +783,224 @@
     });
     $('#w-empty').style.display = /^https?:/i.test(WEB.lastUrl || S.state.settings.webSearch.url || '') ? 'none' : '';
     updateWebNav();
+  }
+
+  /* ================= 手机端网页搜书（抓取式） =================
+   * 安卓 WebView 没有 Electron 的 <webview> 标签：document.createElement('webview')
+   * 只是个未知元素 —— 不渲染、没有 loadURL/getURL，原来那版在手机上点「打开」毫无反应。
+   * 手机屏也塞不下一个迷你浏览器，所以这里换成「抓回来自己看」：
+   *   抓 HTML → Engine 本地嗅探 → 只给「这页能不能读 / 有哪些书」的结论，一键入书架。
+   * 桌面端仍走 <webview>，两边互不影响。 */
+  function isAndroidApp() {
+    return typeof window.MoNativeBridge !== 'undefined' ||
+      document.documentElement.classList.contains('is-android');
+  }
+
+  const WA = { built: false, stack: [], busy: false, lastUrl: '' };
+
+  function hostOf(u) {
+    try { return new URL(u).host.replace(/^www\./, ''); } catch (e) { return ''; }
+  }
+
+  /** 搜索引擎结果页：这种页面本身不该被当成「一本书」，只该当成导航 */
+  function isSerpUrl(u) {
+    try {
+      const x = new URL(u);
+      /* cn.bing.com / m.baidu.com 这种带子域的也算，之前写成 ^bing\. 只认裸域名，
+         结果必应搜索页被当成了「正文」，一路走到「加入书架」。 */
+      const host = x.host.replace(/^www\./, '').replace(/^m\./, '');
+      if (!/(^|\.)(bing|baidu|sogou|so|google|zhihu|sm|yandex)\.(com|cn|net)$/.test(host)) return false;
+      return /\/(search|s|web|so)\/?$/i.test(x.pathname.replace(/\/$/, '')) ||
+        /[?&](q|wd|query|word)=/i.test(x.search);
+    } catch (e) { return false; }
+  }
+
+  /** 搜索结果的导航项（网页 / 图片 / 视频 …）不是书，直接扔掉 */
+  const WA_NAV = /^(网页|图片|视频|地图|词典|学术|航班|搜索|更多|全部|资讯|知道|文库|经验|音乐|翻译|购物|新闻|贴吧|百科)$/;
+  /** 搜索结果页脚那些备案 / 条款 / 时间筛选链接 */
+  const WA_JUNK = /备案|ICP备|公网安备|增值电信|许可证|隐私|条款|举报|营业执照|关于我们|联系我们|帮助中心|广告合作|小时内|一周内|一个月内|去年|时间不限/i;
+
+  function resolveWebUrl(raw) {
+    const s = String(raw || '').trim();
+    if (/^https?:\/\//i.test(s)) return s;
+    if (/^www\./i.test(s)) return 'https://' + s;
+    // 形如 xxx.com/path 也当网址，其余一律交给搜索引擎
+    if (/^[\w.-]+\.[a-z]{2,}(\/\S*)?$/i.test(s)) return 'https://' + s;
+    const eng = S.state.settings.webSearch.engine || 'bing';
+    return (ENGINES[eng] || ENGINES.bing)(s);
+  }
+
+  function renderWebMobile() {
+    if (WA.built) return;
+    WA.built = true;
+    WEB.built = true;
+    const eng = S.state.settings.webSearch.engine || 'bing';
+    const v = $('#view-web');
+    v.innerHTML = `
+      <div class="wa-bar">
+        <input id="wa-input" class="wa-input" spellcheck="false" enterkeyhint="search"
+               placeholder="输入书名，或粘贴小说站网址">
+        <button class="btn sm primary" id="wa-go">搜索</button>
+      </div>
+      <div class="wa-tools">
+        <select id="wa-engine" class="wa-engine" title="搜索引擎">
+          ${[['bing', '必应'], ['baidu', '百度'], ['sogou', '搜狗'], ['so360', '360']]
+            .map(([k, n]) => `<option value="${k}" ${eng === k ? 'selected' : ''}>${n}</option>`).join('')}
+        </select>
+        <button class="btn xs" id="wa-paste">粘贴网址</button>
+        <button class="btn xs" id="wa-back" disabled>← 返回</button>
+      </div>
+      <div class="wa-list" id="wa-list"></div>`;
+    $('#wa-go').onclick = () => waFetch($('#wa-input').value);
+    $('#wa-input').addEventListener('keydown', e => { if (e.key === 'Enter') waFetch(e.target.value); });
+    $('#wa-engine').onchange = e => { S.state.settings.webSearch.engine = e.target.value; save(true); };
+    $('#wa-paste').onclick = async () => {
+      try {
+        const t = ((await navigator.clipboard.readText()) || '').trim();
+        if (!t) return toast('剪贴板是空的');
+        $('#wa-input').value = t;
+        waFetch(t);
+      } catch (e) { toast('读不到剪贴板，长按输入框粘贴吧'); }
+    };
+    $('#wa-back').onclick = () => {
+      const prev = WA.stack.pop();
+      $('#wa-back').disabled = !WA.stack.length;
+      if (prev) waFetch(prev, true);
+      else waHome();
+    };
+    waHome();
+  }
+
+  function waHome() {
+    WA.lastUrl = '';
+    $('#wa-list').innerHTML = `
+      <div class="wa-home">
+        <div class="wa-home-t">网页搜书</div>
+        <div class="wa-home-s">输入书名用搜索引擎找站，或把小说站的目录页地址直接粘进来。
+          抓到页面后会在本机识别目录和正文，认出来就能一键加进书架。</div>
+        <div class="wa-home-li">· 加进书架后按章节读，和书源的书一样能记进度、换源、朗读</div>
+        <div class="wa-home-li">· 站点有反爬或整页 JS 渲染时可能抓不到，换个站再试</div>
+      </div>`;
+  }
+
+  async function waFetch(input, isBack) {
+    const raw = String(input || '').trim();
+    if (!raw || WA.busy) return;
+    const url = resolveWebUrl(raw);
+    const list = $('#wa-list');
+    if (!isBack && WA.lastUrl && WA.lastUrl !== url) {
+      WA.stack.push(WA.lastUrl);
+      if (WA.stack.length > 12) WA.stack.shift();
+    }
+    $('#wa-back').disabled = !WA.stack.length;
+    $('#wa-input').value = raw;
+    WA.busy = true;
+    list.innerHTML = `<div class="wa-loading"><i></i><span>正在抓取 ${esc(hostOf(url) || '页面')} …</span></div>`;
+    let r;
+    try {
+      r = await mo.net({ url, charset: 'auto' });
+    } catch (e) {
+      r = { ok: false, error: e.message || String(e) };
+    }
+    WA.busy = false;
+    if (!r || !r.ok) {
+      list.innerHTML = `
+        <div class="wa-card bad">
+          <div class="wa-card-t">打不开这个地址</div>
+          <div class="wa-card-s">${esc((r && r.error) || '网络错误')}</div>
+          <div class="wa-card-a"><button class="btn sm" id="wa-retry">重试</button></div>
+        </div>
+        <div class="wa-src">${esc(url)}</div>`;
+      $('#wa-retry').onclick = () => waFetch(raw, true);
+      return;
+    }
+    const finalUrl = r.url || url;
+    WA.lastUrl = finalUrl;
+    const txt = r.text || '';
+    /* 被反爬拦下来的页面通常很短且带验证字样，直接说清楚，别让用户以为是站点没内容。
+       阈值放宽到 9000：搜狗的拦截页有 5KB 多，只是正文较长的正常页面不会有这些字样。 */
+    if (txt.length < 9000 && /安全验证|人机验证|验证码|captcha|访问异常|拒绝访问|滑动验证|反爬/i.test(txt)) {
+      list.innerHTML = `
+        <div class="wa-card bad">
+          <div class="wa-card-t">这个站拦了自动抓取</div>
+          <div class="wa-card-s">${esc(hostOf(finalUrl))} 要求人机验证，换个搜索引擎或换一家站点试试。</div>
+        </div>
+        <div class="wa-src">${esc(hostOf(finalUrl))}</div>`;
+      return;
+    }
+    let d;
+    try {
+      d = Engine.detectPage(txt, finalUrl);
+    } catch (e) {
+      d = { info: {}, toc: null, content: null, links: [], title: '' };
+    }
+    renderWaResult(d, finalUrl, isSerpUrl(finalUrl));
+  }
+
+  function renderWaResult(d, url, serp) {
+    const list = $('#wa-list');
+    const host = hostOf(url);
+    /* 引擎自己认出这是搜索结果页时也算数（各家域名太多，光靠 URL 判断会漏） */
+    serp = serp || !!d.serp;
+    /* 搜索页上「正文 1337 字」把结果摘要当成了正文，加书架会存一本假书；
+       同域链接也要滤掉（那是导航栏），目录页里恰恰相反 —— 同域才是章节 */
+    const links = (d.links || []).filter(l => {
+      if (!l || !l.url) return false;
+      const t = (l.title || '').trim();
+      if (!t || WA_NAV.test(t)) return false;
+      if (serp && (hostOf(l.url) === host || WA_JUNK.test(t))) return false;
+      return true;
+    }).map(l => ({
+      url: l.url,
+      /* 搜索结果的锚文本常把整段 URL 也带进来（「三体 https://... › item」），切掉 */
+      title: String(l.title || '').replace(/\s*https?:\/\/.*$/i, '').replace(/\s+/g, ' ').trim().slice(0, 80) || hostOf(l.url)
+    }))
+      /* 只剩一个域名（baidu.com）的条目对用户没有意义，宁可不显示 */
+      .filter(l => l.title && !WA_NAV.test(l.title) && !/^[\w-]+(\.[\w-]+)+$/.test(l.title))
+      .slice(0, 40);
+    const readable = !serp && !!(d.toc || d.content);
+    const tocN = d.toc ? d.toc.chapters.length : 0;
+    const chars = d.content ? d.content.chars : 0;
+    const name = (d.info && d.info.name) || d.title || host || '未识别书名';
+    const card = readable
+      ? `<div class="wa-card ok">
+           <div class="wa-card-t">${esc(String(name).slice(0, 40))}</div>
+           <div class="wa-card-s">${tocN ? `目录 ${tocN} 章` : '未识别到目录'}${chars ? ` · 正文 ${chars} 字` : ''}</div>
+           <div class="wa-card-a">
+             <button class="btn sm primary" id="wa-add">加入书架</button>
+             ${d.toc ? `<button class="btn sm" id="wa-add-toc">只导入目录</button>` : ''}
+           </div>
+         </div>`
+      : `<div class="wa-card bad">
+           <div class="wa-card-t">${serp ? (links.length ? `搜索到 ${links.length} 个结果` : '这一页没读出结果') : '这一页没有直接的目录或正文'}</div>
+           <div class="wa-card-s">${serp
+             ? (links.length ? '点下面的条目进站，能读的话会自动认出来' : '搜索引擎的页面版式经常变，也可能是被限流了。换「必应」再搜一次，或把小说站的目录页地址直接粘进来')
+             : (links.length ? '多半是详情页：点下面「查看目录」再嗅探一次，或者直接试着加入书架' : '换个链接，或把目录页地址直接粘进来')}</div>
+           ${!serp && links.length ? `<div class="wa-card-a"><button class="btn sm" id="wa-add">试着加入书架</button></div>` : ''}
+         </div>`;
+    list.innerHTML = `
+      <div class="wa-src">${esc(hostOf(url))}</div>
+      ${card}
+      ${links.length ? `<div class="wa-label">页面里的链接 · ${links.length}</div>
+        <div class="wa-items">
+          ${links.map((l, i) => `<button class="wa-item" data-wa-open="${i}">
+            <span class="wa-item-t">${esc(l.title)}</span>
+            <span class="wa-item-u">${esc(hostOf(l.url) || '')}</span>
+          </button>`).join('')}
+        </div>` : ''}`;
+    const addBtn = $('#wa-add');
+    if (addBtn) {
+      addBtn.onclick = async () => {
+        addBtn.disabled = true; addBtn.textContent = '分析中…';
+        try { await addWebBook(url, readable ? d : null); addBtn.textContent = '已加入'; }
+        catch (e) { addBtn.disabled = false; addBtn.textContent = '加入书架'; toast('加入失败：' + (e.message || e)); }
+      };
+    }
+    const at = $('#wa-add-toc');
+    if (at) at.onclick = () => addWebBook(url, d, true);
+    $$('[data-wa-open]').forEach(el => {
+      el.onclick = () => waFetch(links[+el.dataset.waOpen].url);
+    });
   }
 
   function updateWebNav() {
@@ -1503,7 +1775,7 @@
         </div>
 
         <div class="card">
-          <h3>朗读 <span class="chip">Windows 系统语音</span></h3>
+          <h3>朗读 <span class="chip">${IS_ANDROID ? '系统语音' : 'Windows 系统语音'}</span></h3>
           <div class="row"><div class="rl">音色 / 语速 / 音调<small id="tts-cur">${esc(ttsCurrentLabel())}</small></div>
             <button class="btn sm" id="s-tts">设置</button></div>
           <div class="row"><div class="rl">读完自动下一章</div>
@@ -1523,7 +1795,7 @@
           <div class="row"><div class="rl">阅读时自动预取下一章</div>
             <div class="switch ${s.autoCacheNext ? 'on' : ''}" data-set="autoCacheNext"><i></i></div></div>
           <div class="row"><div class="rl">数据目录<small>${esc(S.info.paths.root)}</small></div>
-            <button class="link" id="open-dir">打开</button></div>
+            ${IS_ANDROID ? '' : '<button class="link" id="open-dir">打开</button>'}</div>
         </div>
 
         <div class="card">
@@ -1572,22 +1844,27 @@
         </div>
 
         <div class="card">
-          <h3>快捷键</h3>
+          ${IS_ANDROID ? `<h3>触屏操作</h3>
+          <div class="row"><div class="rl">进入书籍<small>全屏沉浸：顶栏底栏自动藏起，点屏幕中间唤出，几秒不碰自动再收</small></div></div>
+          <div class="row"><div class="rl">轻点屏幕左右两侧<small>上一页 / 下一页，只在「翻页」模式下生效</small></div></div>
+          <div class="row"><div class="rl">左右滑动<small>翻页；「滚动」模式下滑动即正常滚动正文</small></div></div>
+          <div class="row"><div class="rl">长按书架封面<small>弹出「换源 / 删除」菜单</small></div></div>
+          <div class="row"><div class="rl">长按顶栏 1.2 秒<small>打开自检：桥、存储、联网、WebView 版本逐项列出</small></div></div>` : `<h3>快捷键</h3>
           <div class="row"><div class="rl">打开搜索</div><span><span class="kbd">Ctrl</span> + <span class="kbd">F</span></span></div>
           <div class="row"><div class="rl">导入本地书</div><span><span class="kbd">Ctrl</span> + <span class="kbd">O</span></span></div>
           <div class="row"><div class="rl">上一章 / 下一章</div><span><span class="kbd">←</span> <span class="kbd">→</span></span></div>
           <div class="row"><div class="rl">翻页（分页模式）</div><span><span class="kbd">PgUp</span> <span class="kbd">PgDn</span></span></div>
           <div class="row"><div class="rl">字号 / 主题 / 目录 / 书签</div><span><span class="kbd">+</span><span class="kbd">-</span><span class="kbd">T</span><span class="kbd">C</span><span class="kbd">B</span></span></div>
           <div class="row"><div class="rl">全屏 / 退出全屏</div><span><span class="kbd">F11</span> 或 <span class="kbd">F</span></span></div>
-          <div class="row"><div class="rl">退出阅读</div><span class="kbd">Esc</span></div>
+          <div class="row"><div class="rl">退出阅读</div><span class="kbd">Esc</span></div>`}
         </div>
 
         <div class="card" style="grid-column:1/-1">
           <h3>关于</h3>
-          <div class="row"><div class="rl">版本<small>墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}</small></div>
-            <span class="rv">${S.info.portable ? '便携模式 · 数据在程序目录' : '数据只存本地'}</span></div>
+          <div class="row"><div class="rl">版本<small>${IS_ANDROID ? `墨读 ${esc(S.info.version)} · Android` : `墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}`}</small></div>
+            <span class="rv">${IS_ANDROID ? '数据只存本机' : (S.info.portable ? '便携模式 · 数据在程序目录' : '数据只存本地')}</span></div>
           <div class="row"><div class="rl">数据位置<small>${esc(S.info.paths.root)}</small></div>
-            <button class="link" id="open-dir2">打开</button></div>
+            ${IS_ANDROID ? '' : '<button class="link" id="open-dir2">打开</button>'}</div>
           <div class="row"><div class="rl">书源格式<small>兼容 Legado(阅读) bookSource JSON 的常用字段；xpath/复杂 JS 规则可能不生效</small></div></div>
           <div class="row"><div class="rl">备份格式<small>导出的 zip 内同时含 bookSource.json / bookshelf.json 等原版字段，原版「阅读」可直接导入</small></div></div>
         </div>
@@ -1620,8 +1897,9 @@
       const k = el.dataset.set;
       s[k] = !s[k]; el.classList.toggle('on', s[k]); save(true);
     });
-    $('#open-dir').onclick = () => mo.openDir();
-    $('#open-dir2').onclick = () => mo.openDir();
+    /* 安卓没有「文件管理器」可跳转，这两个按钮根本不会渲染出来，要判空 */
+    if ($('#open-dir')) $('#open-dir').onclick = () => mo.openDir();
+    if ($('#open-dir2')) $('#open-dir2').onclick = () => mo.openDir();
     $('#s-tts').onclick = () => ttsPanel();
     $('#s-tts-test').onclick = () => {
       const v = ttsOrderedVoices().find(x => x.voiceURI === ttsCfg().voiceURI) || ttsOrderedVoices()[0];
@@ -1931,7 +2209,10 @@
      =========================================================== */
   const R = {
     book: null, ci: 0, chapters: [], paras: [], title: '',
-    pages: [[]], page: 0, tts: false, ttsIdx: 0, timer: null, saveT: null, chars: 0
+    pages: [[]], page: 0, tts: false, ttsIdx: 0, timer: null, saveT: null, chars: 0,
+    /* 连续滚动缓冲区（滚动模式）：buf=已接上的章节号，bufTail=最后一章，
+       bufLock=正在取下一章，bufFail=取失败的章节与时间；lastWithin=本章内进度 */
+    buf: null, bufTail: -1, bufLock: false, bufFail: {}, lastWithin: null, loadSeq: 0
   };
 
   function applySettings() {
@@ -1973,6 +2254,8 @@
     R.ci = clamp(ci || 0, 0, Math.max(0, (b.total || 1) - 1));
     R.page = 0;
     $('#reader').classList.add('open');
+    /* 手机进书即沉浸：顶/底栏滑出屏幕，点中间唤出（几秒不用自动再藏） */
+    if (isAndroidApp()) $('#reader').classList.add('bars-off');
     $('#r-switch').style.display = b.kind === 'local' ? 'none' : '';
     applySettings();
     $('#r-toc-panel').classList.remove('open');
@@ -1984,15 +2267,18 @@
   function closeReader() {
     const b = R.book;
     if (b) {
+      /* 连续滚动时缓冲区里有多章，整页 scrollTop 不再等于本章进度，
+         用 updateProgress 算好的「本章内进度」落盘 */
       const stage = $('#r-stage');
       const max = stage.scrollHeight - stage.clientHeight;
-      const pct = max > 10 ? stage.scrollTop / max : 1;
+      const pct = R.lastWithin != null ? R.lastWithin : (max > 10 ? stage.scrollTop / max : 1);
       setProgress(b.id, R.ci, R.title, pct);
     }
     stopTTS();
     clearInterval(R.timer);
     R.timer = null;
-    $('#reader').classList.remove('open');
+    clearTimeout(R.barsT); R.barsT = null;
+    $('#reader').classList.remove('open', 'bars-off');
     $('#r-toc-panel').classList.remove('open');
     $('#toc-mask').classList.remove('on');
     R.book = null;
@@ -2014,12 +2300,17 @@
   async function loadChapter(ci, dir, pct) {
     const b = R.book;
     if (!b) return;
+    /* 并发导航互斥：快速连按「上一章」时，慢的那次可能后完成，把旧章节的标题/
+       内容配新章节的 ci 渲染出来（章节和 data-ci 就错位了）。后启动的调用递增
+       代数，先启动的完成后发现代数对不上就整个丢弃。 */
+    const seq = ++R.loadSeq;
     if (R.tts) stopTTS();
     R.ci = clamp(ci, 0, Math.max(0, (b.total || 1) - 1));
     const loading = $('#r-loading');
     loading.textContent = '加载中…';
     $('#r-pagenum').textContent = '';
     R.paras = [];
+    R.lastWithin = null;
 
     try {
       let title = '', paras = [];
@@ -2032,7 +2323,9 @@
         if (!src) throw new Error('这个书源已被删除，可以点右上角「换源」换一个源继续读');
         if (!b.chapters || !b.chapters.length) {
           loading.textContent = '获取目录…';
-          const toc = await Engine.getToc(mo.net, src, b.bookUrl);
+          /* 30s 双保险：底层网络有自己的超时，但失效书源常走多级重定向/慢站，
+             不兜一层的话「加载中…」能挂到天荒地老，看起来就像卡死 */
+          const toc = await withTimeout(Engine.getToc(mo.net, src, b.bookUrl), 30000);
           b.chapters = toc.chapters; b.total = toc.chapters.length;
           if (toc.info.name) b.name = toc.info.name;
           if (toc.info.author) b.author = toc.info.author;
@@ -2050,7 +2343,7 @@
           paras = cached.text;
         } else {
           loading.textContent = '加载正文…';
-          const r = await Engine.getContent(mo.net, src, ch.url);
+          const r = await withTimeout(Engine.getContent(mo.net, src, ch.url), 30000);
           paras = r.paras;
           if (!paras.length) throw new Error('正文为空，检查正文规则');
           await mo.cache.set(b.id, R.ci, { title, text: paras });
@@ -2060,6 +2353,8 @@
         }
       }
 
+      /* 等待期间用户可能又点了别的章节：过期的这次直接丢弃，不渲染不写状态 */
+      if (seq !== R.loadSeq) return;
       R.title = title;
       R.paras = paras;
       R.chars = paras.join('').length;
@@ -2079,16 +2374,25 @@
       $('#r-title').innerHTML = `${esc(b.name)}<em>${esc(title)}</em>`;
       $('#r-info').textContent = `本章 ${R.chars.toLocaleString()} 字`;
       loading.textContent = '';
+      /* 章节很短不满一屏时永远不产生 scroll 事件，加载完主动续一次 */
+      if (seq === R.loadSeq) maybeContinueScroll();
     } catch (e) {
+      if (seq !== R.loadSeq) return;      // 过期的失败也别把新章节的页面糊成错误页
       const msg = e.message || String(e);
       const canSwitch = b.kind !== 'local';
       $('#r-page').innerHTML = `<div class="err">加载失败：${esc(msg)}<br>
-        <span style="font-size:12px;opacity:.7">${canSwitch ? '这个书源可能已失效，可以点下面按钮换一个源继续读' : '检查「书源」里的规则，或重新导入这本书'}</span>
-        ${canSwitch ? '<div style="margin-top:16px"><button class="btn primary" id="err-switch">换源继续读</button></div>' : ''}</div>`;
+        <span style="font-size:12px;opacity:.7">${canSwitch ? '这个书源可能已失效，先点「重试」再抓一次；还不行就换一个源继续读' : '检查「书源」里的规则，或重新导入这本书'}</span>
+        <div class="err-act">
+          <button class="btn" id="err-retry">重试</button>
+          ${canSwitch ? '<button class="btn primary" id="err-switch">换源继续读</button>' : ''}
+        </div></div>`;
       const sw = $('#err-switch');
       if (sw) sw.onclick = () => $('#r-switch').click();
+      const rt = $('#err-retry');
+      if (rt) rt.onclick = () => { rt.disabled = true; loadChapter(R.ci, 0, 0); };
       loading.textContent = '';
       R.paras = [];
+      R.buf = null; R.bufTail = -1;   // 出错时清掉缓冲区，别往错误页后面续章节
     }
   }
 
@@ -2101,6 +2405,109 @@
       const r = await Engine.getContent(mo.net, src, ch.url);
       if (r.paras.length) await mo.cache.set(b.id, idx, { title: ch.title, text: r.paras });
     } catch (e) { /* 预取失败无所谓 */ }
+  }
+
+  /* ---------------- 滚动模式连续阅读：滚到底自动续下一章 ---------------- */
+
+  /** 取某章正文（连续滚动用）：本地直接读，网络书先查缓存再抓，超时兜底与 loadChapter 一致 */
+  async function chapterParas(b, idx) {
+    if (b.kind === 'local') {
+      const r = await mo.localChapter(b.id, idx);
+      if (!r.ok) throw new Error(r.error || '读取失败');
+      return { title: r.title, paras: r.text };
+    }
+    const ch = b.chapters && b.chapters[idx];
+    if (!ch) throw new Error('章节不存在');
+    const cached = await mo.cache.get(b.id, idx);
+    if (cached && cached.text && cached.text.length) return { title: ch.title, paras: cached.text };
+    const src = srcForBook(b);
+    if (!src) throw new Error('书源已被删除，无法继续加载');
+    const r = await withTimeout(Engine.getContent(mo.net, src, ch.url), 30000);
+    if (!r.paras.length) throw new Error('正文为空，检查正文规则');
+    await mo.cache.set(b.id, idx, { title: ch.title, text: r.paras });
+    if (S.state.settings.autoCacheNext && idx + 1 < (b.chapters || []).length) prefetch(b, src, idx + 1);
+    return { title: ch.title, paras: r.paras };
+  }
+
+  /** 滚动模式：视口逼近缓冲区底部时，把下一章接到后面。不动当前滚动位置，
+   *  章节归属由 updateProgress 按各段 offsetTop 判定（见「判定线」）。
+   *  失败不自动重试刷屏，在文末挂一条「重试」，30 秒内也不再自动碰同一章。 */
+  async function maybeContinueScroll() {
+    const s = S.state.settings;
+    if (s.pageMode !== 'scroll' || !R.book || !R.buf || R.bufLock) return;
+    const b = R.book;
+    const total = b.total || 1;
+    const idx = R.bufTail + 1;
+    if (idx >= total) return;
+    if (R.bufFail && R.bufFail[idx] && Date.now() - R.bufFail[idx] < 30000) return;
+    const stage = $('#r-stage');
+    if (!stage) return;
+    /* 距底部不足约 1.2 屏时开始续——网络慢也来得及在用户滚到之前接上 */
+    if (stage.scrollTop + stage.clientHeight < stage.scrollHeight - stage.clientHeight * 1.2) return;
+    const seq = R.loadSeq;
+    R.bufLock = true;
+    try {
+      const { title, paras } = await chapterParas(b, idx);
+      /* 等待期间可能切了模式 / 换了书 / 缓冲区被 renderChapter 重置过 */
+      if (seq !== R.loadSeq || S.state.settings.pageMode !== 'scroll' || !R.book || R.book.id !== b.id || !R.buf) return;
+      const page = $('#r-page');
+      if (!page) return;
+      /* 只允许按序追加：目标章已在 DOM 里、或 DOM 里已有更靠后的章（旧缓冲区残留 /
+         并发追加乱序），都不再插，避免章节段乱序害边界判定失灵 */
+      if ($$('#r-page .ch-sec').some(el => +el.dataset.ci >= idx)) return;
+      if (idx !== R.bufTail + 1) return;
+      const last = idx + 1 >= total;
+      const sec = document.createElement('section');
+      sec.className = 'ch-sec';
+      sec.dataset.ci = idx;
+      sec.dataset.title = title;
+      sec.dataset.chars = paras.join('').length;
+      sec.innerHTML = `<div class="ch-no">${esc(b.name)} · 共 ${total} 章</div><h2>${esc(title)}</h2>` +
+        `<div class="body">${paras.map(p => `<p>${esc(p)}</p>`).join('')}</div>` + (last ? pageTailHtml() : '');
+      page.appendChild(sec);
+      R.buf.push(idx);
+      R.bufTail = idx;
+      addStats(paras.join('').length, 0);
+      page.querySelectorAll('.buf-err').forEach(el => el.remove());
+    } catch (e) {
+      if (R.bufFail) R.bufFail[idx] = Date.now();
+      const page = $('#r-page');
+      if (page && S.state.settings.pageMode === 'scroll' && R.book && R.book.id === (b && b.id)) {
+        page.querySelectorAll('.buf-err').forEach(el => el.remove());
+        const div = document.createElement('div');
+        div.className = 'buf-err';
+        div.innerHTML = `下一章没接上：${esc(e.message || e)} <button class="btn" type="button">重试</button>`;
+        div.querySelector('button').onclick = () => {
+          if (R.bufFail) delete R.bufFail[idx];
+          div.remove();
+          maybeContinueScroll();
+        };
+        page.appendChild(div);
+      }
+    } finally {
+      R.bufLock = false;
+      updateProgress(true);
+      /* 刚接上的一章可能仍然很短，续完再检查一次，直到离底部超过 1.2 屏 */
+      maybeContinueScroll();
+    }
+  }
+
+  /** 翻页动效：走 Web Animations，不再「删类 → 读 offsetWidth → 加类」逼一次同步重排。
+   *  dir>0 右→左滑入，dir<0 反向，0 表示淡入（换设置/重排）。R.noAnim 时跳过。 */
+  function pageAnim(el, dir) {
+    if (!el || R.noAnim || dir == null || !el.animate) return;
+    const kf = dir > 0
+      ? [{ opacity: .2, transform: 'translateX(26px)' }, { opacity: 1, transform: 'none' }]
+      : dir < 0
+        ? [{ opacity: .2, transform: 'translateX(-26px)' }, { opacity: 1, transform: 'none' }]
+        : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }];
+    try {
+      /* 整屏正文做透明度动画在手机上会整页重绘；提前提层交给合成器，动画期间不再掉帧 */
+      el.style.willChange = 'transform, opacity';
+      const a = el.animate(kf, { duration: 260, easing: 'ease' });
+      const done = () => { el.style.willChange = ''; };
+      if (a) { a.onfinish = done; a.oncancel = done; } else done();
+    } catch (e) { el.style.willChange = ''; /* 老 WebView 不支持就算了 */ }
   }
 
   function renderChapter(dir) {
@@ -2123,17 +2530,19 @@
           page.removeChild(page.lastElementChild);
         }
       }
-      page.classList.remove('slide-l', 'slide-r');
-      void page.offsetWidth;
-      page.classList.add(dir > 0 ? 'slide-l' : dir < 0 ? 'slide-r' : 'pageturn');
+      pageAnim(page, dir);
       $('#r-stage').scrollTop = 0;
       $('#r-pagenum').textContent = `${R.page + 1}/${R.pages.length} 页`;
     } else {
+      /* 连续滚动：本章是缓冲区第一段，滚近底部时 maybeContinueScroll 会把下一章接在
+         后面（见 prefetch 之后）。缓冲区结构：#r-page > section.ch-sec[data-ci] */
+      R.buf = [R.ci]; R.bufTail = R.ci; R.bufLock = false; R.bufFail = {};
+      const last = R.ci + 1 >= (b.total || 1);
       const head = `<div class="ch-no">${esc(b.name)} · 共 ${b.total || '?'} 章</div><h2>${esc(R.title)}</h2>`;
-      page.innerHTML = head + `<div class="body">${R.paras.map(p => `<p>${esc(p)}</p>`).join('')}</div>` + pageTailHtml();
-      page.classList.remove('pageturn');
-      void page.offsetWidth;
-      page.classList.add('pageturn');
+      page.innerHTML = `<section class="ch-sec" data-ci="${R.ci}" data-title="${esc(R.title)}" data-chars="${R.chars}">` +
+        head + `<div class="body">${R.paras.map(p => `<p>${esc(p)}</p>`).join('')}</div>` +
+        (last ? pageTailHtml() : '') + `</section>`;
+      pageAnim(page, dir === undefined ? null : dir);
       if (dir) $('#r-stage').scrollTop = 0;
       $('#r-pagenum').textContent = '';
     }
@@ -2212,12 +2621,25 @@
       return;
     }
 
-    /* ---- 第二步：逐段排版分页 ---- */
+    /* ---- 第二步：逐段排版分页 ----
+     * 所有段落一次性放进测量盒、统一读高度：第一次读取触发排版，后面全是缓存读数。
+     * 旧实现每段都「清空 → 重建 <p> → 读 offsetHeight」，n 段就是 n 次强制回流，
+     * 手机 WebView 上一章几百段要卡一两秒，翻页像 PPT。
+     * 行中截断（整段超过一页）仍然逐块实测，但只有这种段落才付这个钱。 */
     const box = mk('');
     const bEl = document.createElement('div');
     bEl.className = 'body';
     box.appendChild(bEl);
     const mb = el => parseFloat(getComputedStyle(el).marginBottom) || 0;
+    const els = R.paras.map(t => {
+      const p = document.createElement('p');
+      p.textContent = t;
+      bEl.appendChild(p);
+      return p;
+    });
+    /* 段落只有下外边距、无上外边距，相邻段高度可直接相加 */
+    const MB = els.length ? mb(els[0]) : 0;
+    const heights = els.map(el => el.offsetHeight);
     /** 二分找「前 n 个字」正好还在 maxH 高度内的最大 n */
     const fitOffset = (node, maxH, len) => {
       const rg = document.createRange();
@@ -2235,26 +2657,30 @@
     const pages = [[]];
     /* 首页先扣掉标题占的高度，后续页从 0 开始 */
     let cur = 0, used = firstPenalty;
-    for (const para of R.paras) {
-      let rest = para;
-      let guard = 0;
+    let sp = null;                       // 行中截断的测量元素（复用同一个，避免反复插拔）
+    for (let i = 0; i < R.paras.length; i++) {
+      const whole = heights[i] + MB;
+      if (used + whole <= availH + 0.5) {          // 整段放得下
+        pages[cur].push(R.paras[i]);
+        used += whole;
+        continue;
+      }
+      if (pages[cur].length) {                     // 本页已有内容 → 先翻页再试
+        pages.push([]); cur = pages.length - 1; used = 0;
+      }
+      if (whole <= availH + 0.5) {                 // 空页整段放得下
+        pages[cur].push(R.paras[i]);
+        used = whole;
+        continue;
+      }
+      /* 空页也放不下：按剩余高度从行中间截断 */
+      if (!sp) { sp = document.createElement('p'); bEl.appendChild(sp); }
+      let rest = R.paras[i], guard = 0;
       while (rest && guard++ < 400) {
-        bEl.innerHTML = '';
-        const el = document.createElement('p');
-        el.textContent = rest;
-        bEl.appendChild(el);
-        const full = el.offsetHeight + mb(el);
-        if (used + full <= availH + 0.5) {          // 整段放得下
-          pages[cur].push(rest);
-          used += full;
-          break;
-        }
-        if (pages[cur].length) {                     // 本页已有内容 → 先翻页再试
-          pages.push([]); cur = pages.length - 1; used = 0;
-          continue;
-        }
-        /* 空页也放不下：按剩余高度从行中间截断 */
-        const node = el.firstChild;
+        sp.textContent = rest;
+        const full = sp.offsetHeight + MB;
+        if (full <= availH + 0.5) { pages[cur].push(rest); used = full; rest = ''; break; }
+        const node = sp.firstChild;
         let off = node ? fitOffset(node, availH, rest.length) : 0;
         if (off <= 0) { pages[cur].push(rest); used = availH; break; }  // 高度不足一行，硬放避免死循环
         /* 落点在标点上时顺延一个字，免得下一页首行以标点开头 */
@@ -2264,6 +2690,7 @@
         pages.push([]); cur = pages.length - 1; used = 0;
       }
     }
+    if (sp) sp.remove();
     if (pages.length > 1 && !pages[pages.length - 1].length) pages.pop();
     document.body.removeChild(box);
 
@@ -2324,8 +2751,29 @@
       const stage = $('#r-stage');
       const max = stage.scrollHeight - stage.clientHeight;
       within = max > 10 ? stage.scrollTop / max : 1;
+      /* 连续滚动：缓冲区里不止一章时，用「判定线（视口上沿往下 40%）落在哪个
+         章节段里」更新当前章。offscreen 段落有 content-visibility 会让 offsetTop
+         略有浮动，但各段先后顺序不变，判定不受影响。 */
+      if (R.buf && R.buf.length > 1) {
+        const secs = $$('#r-page .ch-sec');
+        const line = stage.scrollTop + stage.clientHeight * 0.4;
+        let cur = +secs[0].dataset.ci, curEl = secs[0];
+        for (const sec of secs) {
+          if (sec.offsetTop <= line) { cur = +sec.dataset.ci; curEl = sec; } else break;
+        }
+        if (cur !== R.ci) {
+          R.ci = cur;
+          R.title = curEl.dataset.title || R.title;
+          R.chars = +curEl.dataset.chars || R.chars;
+          $('#r-title').innerHTML = `${esc(b.name)}<em>${esc(R.title)}</em>`;
+          $('#r-info').textContent = `本章 ${R.chars.toLocaleString()} 字`;
+          updateTocActive();
+        }
+        within = clamp((line - curEl.offsetTop) / Math.max(1, curEl.offsetHeight), 0, 1);
+      }
       overall = ((R.ci + within) / Math.max(1, b.total)) * 100;
     }
+    R.lastWithin = within;
     $('#r-bar').style.width = clamp(overall, 0, 100) + '%';
     $('#r-pct').textContent = Math.round(clamp(overall, 0, 100)) + '%';
     if (!reset) {
@@ -2334,6 +2782,46 @@
         if (R.book) setProgress(R.book.id, R.ci, R.title, within);
       }, 1200);
     }
+  }
+
+  /* ---------------- 沉浸阅读（手机）：顶/底栏滑出，点中间唤出 ---------------- */
+
+  /** 阅读区高度变了（顶/底栏滑入滑出、转屏）后，按原比例落回对应页重新排版 */
+  function relayoutPagedKeepPage() {
+    if (!R.book || S.state.settings.pageMode !== 'paged') return;
+    const before = R.pages.length;
+    const ratio = before > 1 ? R.page / (before - 1) : 0;
+    R.noAnim = true;                     // 重排不是翻页，别连播两次翻页动画
+    try {
+      pagedKey = '';                     // 强制按新尺寸重排
+      renderChapter(0);
+      if (before > 1 && R.pages.length > 1) {
+        R.page = clamp(Math.round(ratio * (R.pages.length - 1)), 0, R.pages.length - 1);
+        renderChapter(0);
+      }
+    } finally { R.noAnim = false; }
+    updateProgress(true);
+  }
+
+  function toggleReaderBars() {
+    const off = $('#reader').classList.toggle('bars-off');
+    if (off) { clearTimeout(R.barsT); R.barsT = null; }
+    else startBarsAutoHide();
+    /* 顶/底栏从文档流里拿掉后阅读区高度会变，正文得跟着重排 */
+    relayoutPagedKeepPage();
+  }
+
+  /** 唤出的工具栏几秒不碰就自动再藏回去，别让手机屏幕上常驻两块铁 */
+  function startBarsAutoHide() {
+    clearTimeout(R.barsT);
+    if (!isAndroidApp()) return;
+    R.barsT = setTimeout(() => {
+      R.barsT = null;
+      if (!$('#reader').classList.contains('open')) return;
+      if ($('#r-toc-panel').classList.contains('open')) return;
+      $('#reader').classList.add('bars-off');
+      relayoutPagedKeepPage();
+    }, 4500);
   }
 
   function turnPageOrChapter(d) {
@@ -2372,6 +2860,7 @@
       const title = typeof c === 'string' ? c : c.title;
       return `<div class="toc-item ${i === R.ci ? 'on' : ''}" data-ci="${i}"><span>${i + 1}</span>${esc(title)}</div>`;
     }).join('');
+    R.tocOn = null;                       // 列表重建了，旧的「当前项」引用作废
     $$('#toc-list .toc-item').forEach(el => el.onclick = () => {
       R.page = 0;
       loadChapter(+el.dataset.ci, 0);
@@ -2381,9 +2870,16 @@
     updateTocActive();
   }
   function updateTocActive() {
-    $$('#toc-list .toc-item').forEach(el => el.classList.toggle('on', +el.dataset.ci === R.ci));
-    const on = $('#toc-list .toc-item.on');
-    if (on) on.scrollIntoView({ block: 'center' });
+    /* 每次翻页都会调这里。目录没开时整章几百个条目挨个 toggle 纯属白烧 CPU
+       （老实现还会对当前项 scrollIntoView，等于每翻一页逼一次排版），
+       目录打开时 buildToc 会重新标一次，所以这里直接返回。 */
+    if (!$('#r-toc-panel').classList.contains('open')) return;
+    if (R.tocOn && R.tocOn.isConnected) R.tocOn.classList.remove('on');
+    const on = document.querySelector(`#toc-list .toc-item[data-ci="${R.ci}"]`);
+    if (!on) { R.tocOn = null; return; }
+    on.classList.add('on');
+    R.tocOn = on;
+    on.scrollIntoView({ block: 'center' });
   }
 
   function setTheme(t) {
@@ -2467,7 +2963,11 @@
     if (!window.speechSynthesis) return toast('当前环境不支持语音朗读');
     const synth = window.speechSynthesis;
     const cfg = ttsCfg();
-    const ps = $$('.page .body p');
+    /* 连续滚动时缓冲区里可能已接上后面几章：朗读只圈定当前章的段落，
+       不然会把下一章一起读进队列；同时记下「朗读所属章」，章末按它推进，
+       用户手动滚走导致 R.ci 提前变化也不会跳章 */
+    const scope = $(`.page .ch-sec[data-ci="${R.ci}"]`) || document;
+    const ps = $$('.page .body p', scope);
     if (!ps.length) return;
 
     const voices = ttsOrderedVoices();
@@ -2480,6 +2980,7 @@
 
     const startIdx = parts.findIndex(x => x.pi === (fromPara || 0));
     R.tts = true;
+    R.ttsCi = R.ci;
     R.ttsIdx = startIdx < 0 ? 0 : startIdx;
     R.ttsParts = parts;
     R.ttsPs = ps;
@@ -2490,9 +2991,10 @@
     const speakNext = () => {
       if (!R.tts) return;
       if (R.ttsIdx >= parts.length) {
-        if (cfg.autoNext && R.ci < (R.book.total || 1) - 1) {
+        const nx = (R.ttsCi != null ? R.ttsCi : R.ci) + 1;
+        if (cfg.autoNext && nx < (R.book.total || 1)) {
           R.page = 0;
-          loadChapter(R.ci + 1, 1).then(() => { R.tts = false; startTTS(0); });
+          loadChapter(nx, 1).then(() => { R.tts = false; startTTS(0); });
         } else { stopTTS(); toast('本章读完'); }
         return;
       }
@@ -2513,6 +3015,13 @@
       u.onend = () => { R.ttsIdx++; speakNext(); };
       u.onerror = e => {
         if (e && e.error === 'interrupted') return; // 用户手动停止
+        /* 引擎根本没有可用音色（没装 TTS / 还在初始化）：不要再往下轮，
+           否则每一段都立刻报错，几百毫秒就把整章「读完」了，看着像朗读自己跑飞了。 */
+        if (e && (e.error === 'native' || e.message)) {
+          R.tts = false; clearTimeout(ttsQueue);
+          stopTTS();
+          return toast(e.message ? '朗读失败：' + e.message : '朗读失败：语音引擎不可用', 5200);
+        }
         R.ttsIdx++;
         ttsQueue = setTimeout(speakNext, 120);
       };
@@ -2534,7 +3043,9 @@
           <select id="tts-voice">
             ${voices.length
               ? `<option value="">跟随系统默认</option>` + voices.map(v => `<option value="${esc(v.voiceURI)}" ${cfg.voiceURI === v.voiceURI ? 'selected' : ''}>${esc(v.name)} · ${esc(v.lang)}${v.localService ? '' : ' · 在线'}</option>`).join('')
-              : '<option value="">（没有检测到语音，可用系统「设置 → 时间和语言 → 语音」添加）</option>'}
+              : `<option value="">${IS_ANDROID
+                ? '（没检测到语音引擎，可在系统设置里装一个文字转语音引擎）'
+                : '（没有检测到语音，可用系统「设置 → 时间和语言 → 语音」添加）'}</option>`}
           </select></div>
         <div class="field"><label>语速 <span id="tts-rate-v">${(cfg.rate || 1).toFixed(1)}x</span></label>
           <input type="range" id="tts-rate" min="50" max="200" step="5" value="${Math.round((cfg.rate || 1) * 100)}" /></div>
@@ -2638,24 +3149,28 @@
         </div>
         <button class="btn sm ${r.sourceId === b.sourceId ? '' : 'primary'}" data-sw="${i}" ${r.sourceId === b.sourceId ? 'disabled' : ''}>切到这本</button>
       </div>`).join('') + (done ? '' : `<div class="hint">继续搜索中…</div>`);
-    $$('[data-sw]').forEach(el => el.onclick = () => applySwitch(hits[+el.dataset.sw]));
+    $$('[data-sw]').forEach(el => el.onclick = () => applySwitch(hits[+el.dataset.sw], el));
   }
 
-  async function applySwitch(r) {
+  async function applySwitch(r, btn) {
     const b = R.book;
     if (!b) return;
     const src = sourceById(r.sourceId);
     if (!src) return toast('书源不存在');
-    const btn = $(`[data-sw]`);
-    if (btn) btn.disabled = true;
+    /* 只锁被点的那一个：以前用 $('[data-sw]') 取到的是列表首个按钮，
+       点第 3 本失败时变灰的是第 1 本，看着像「点了没反应」 */
+    const label = btn ? btn.textContent : '';
+    const busy = on => { if (!btn) return; btn.disabled = on; btn.textContent = on ? '切换中…' : label; };
+    busy(true);
     toast('正在获取新源目录…');
     let toc;
     try {
-      toc = await Engine.getToc(mo.net, src, r.bookUrl);
+      toc = await withTimeout(Engine.getToc(mo.net, src, r.bookUrl), 30000);
     } catch (e) {
+      busy(false);
       return toast('换源失败：' + (e.message || e));
     }
-    if (!toc.chapters.length) return toast('这个源没有目录，换一个试试');
+    if (!toc.chapters.length) { busy(false); return toast('这个源没有目录，换一个试试'); }
 
     const curTitle = R.title || '';
     const curNorm = normChapTitle(curTitle);
@@ -2674,10 +3189,11 @@
     await mo.cache.clear(b.id);
     save(true);
     closeModal();
+    renderShelf();          // 书架卡片上的来源名 / 进度跟着换，不然回到书架像没换成
     R.chapters = b.chapters;
     R.ci = idx;
     buildToc();
-    await loadChapter(idx, 0);
+    if (R.book) await loadChapter(idx, 0);
     toast(`已换到「${src.name}」，定位到 ${toc.chapters[idx].title.slice(0, 20)}`);
   }
 
@@ -2746,25 +3262,38 @@
     /* 触摸滑动翻页后浏览器还会补一个 click，别让它再翻一页 */
     let swipedAt = 0;
 
-    stageEl.addEventListener('scroll', () => updateProgress());
+    let updQ = false;
+    stageEl.addEventListener('scroll', () => {
+      /* 滚动模式一甩就是几十个 scroll 事件，逐个读 scrollHeight 很伤：
+         收拢到每一帧只更新一次进度 */
+      if (updQ) return;
+      updQ = true;
+      requestAnimationFrame(() => { updQ = false; updateProgress(); maybeContinueScroll(); });
+    });
     stageEl.addEventListener('click', e => {
       /* 只在「点到正文」时才算翻页手势。这里绝不能写成 closest('p') —— 正文铺满了整个屏幕，
          那样等于把左右两侧的翻页热区全废掉，手指怎么点都没反应（桌面合成事件 target 是容器，
          所以自动化测试反而看不出来）。按钮/目录/底栏这些可交互元素仍然排除。 */
       if (e.target.closest('a,button,input,textarea,select,.toc,.rb-btn')) return;
-      if (!isPaged()) return;
-      if (Date.now() - swipedAt < 450) return;
       /* 有选中的文字（长按选词 / 拖动选择）时不翻页。这里直接看当前选区，
          不要用「touchstart 时记一个标记」那种写法：鼠标点击、脚本点击不会触发
          touchstart，标记会一直残留，把下一次点击吃掉。 */
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed && String(sel).trim().length > 0) return;
-      // 点击左右两侧翻页：热区随阅读区宽度自适应，手机上约占 2/9 屏宽
+      if (Date.now() - swipedAt < 450) return;
       const r = stageEl.getBoundingClientRect();
-      const zone = Math.max(56, Math.min(130, r.width * 0.22));
       const x = e.clientX - r.left;
-      if (x < zone) turnPageOrChapter(-1);
-      else if (x > r.width - zone) turnPageOrChapter(1);
+      /* 手机沉浸阅读：点中间唤出/收起工具栏（滚动模式没有页，整个区域都算中间）；
+         左右热区仍翻页。桌面行为不变。 */
+      if (isAndroidApp()) {
+        if (!isPaged()) { toggleReaderBars(); return; }
+        if (x >= zoneOf(r) && x <= r.width - zoneOf(r)) { toggleReaderBars(); return; }
+      }
+      if (!isPaged()) return;
+      // 点击左右两侧翻页：热区随阅读区宽度自适应，手机上约占 2/9 屏宽
+      if (x < zoneOf(r)) turnPageOrChapter(-1);
+      else if (x > r.width - zoneOf(r)) turnPageOrChapter(1);
+      function zoneOf(rect) { return Math.max(56, Math.min(130, rect.width * 0.22)); }
     });
 
     /* 桌面：滚轮（含触控板）翻页，带节流免得惯性一下翻好几页 */
@@ -2801,19 +3330,17 @@
     /* 窗口尺寸 / 横竖屏变化：重排后按原进度比例落到对应页，而不是跳回本章第 1 页 */
     let rzT = 0;
     window.addEventListener('resize', () => {
-      if (!R.book || S.state.settings.pageMode !== 'paged') return;
+      if (!R.book) return;
       clearTimeout(rzT);
-      rzT = setTimeout(() => {
-        if (!R.book || S.state.settings.pageMode !== 'paged') return;
-        const before = R.pages.length;
-        const ratio = before > 1 ? R.page / (before - 1) : 0;
-        pagedKey = '';                       // 强制按新尺寸重排
-        renderChapter(0);
-        if (before > 1 && R.pages.length > 1) {
-          R.page = clamp(Math.round(ratio * (R.pages.length - 1)), 0, R.pages.length - 1);
-          renderChapter(0);
-        }
-      }, 120);
+      rzT = setTimeout(() => relayoutPagedKeepPage(), 120);
+    });
+
+    /* 碰了顶/底栏就重置自动隐藏计时，别看着看着字被收走 */
+    ['.reader-top', '.reader-bot'].forEach(sel => {
+      const el = document.querySelector('#reader ' + sel);
+      if (el) el.addEventListener('pointerdown', () => {
+        if (!$('#reader').classList.contains('bars-off')) startBarsAutoHide();
+      });
     });
   }
 
@@ -2877,6 +3404,15 @@
       });
       // 兜底：就算 DOM 摘不掉，也用行内样式压住，绝不让关闭按钮露出来
       document.querySelectorAll('.winbtns').forEach(el => { el.style.setProperty('display', 'none', 'important'); });
+      /* 安卓本来就是全屏应用，阅读器里的「全屏(F11)」按钮毫无意义——藏掉。
+         用户反馈：界面上还残留着电脑才有的「关闭全屏」这类功能。 */
+      document.querySelectorAll('#r-full').forEach(el => {
+        el.style.setProperty('display', 'none', 'important');
+      });
+      /* 「书架」和「✕」在手机上是一回事（都是退出阅读器），留文字更明确的那个 */
+      document.querySelectorAll('#r-close').forEach(el => {
+        el.style.setProperty('display', 'none', 'important');
+      });
     } catch (e) { /* ignore */ }
   }
 
@@ -2887,13 +3423,23 @@
        直接从 DOM 摘掉；同时确保布局标记在——后面任何一步出问题也不会退回电脑版界面 */
     stripDesktopChrome();
 
-    /* 返回键：弹窗 → 目录抽屉 → 全屏 → 阅读器 → 回书架 → 系统（再按一次退出） */
+    /* 返回键：弹窗 → 目录抽屉 → 阅读器 → 网页后退 → 回书架 → 系统（再按一次退出）
+       网页搜书里直接跳书架曾让人很懵：用户在小说站里一层层点进去，
+       按返回自然期望「退回上一页」，而不是整个视图被抽掉 */
     window.__moreadOnBack = () => {
       if ($('#modal').classList.contains('open')) { closeModal(); return true; }
       if ($('#reader').classList.contains('open')) {
         if ($('#r-toc-panel').classList.contains('open')) { $('#toc-mask').click(); return true; }
-        if (document.body.classList.contains('is-full')) { toggleFullscreen(); return true; }
         closeReader();
+        return true;
+      }
+      if (S.view === 'web' && isAndroidApp()) {
+        /* 有浏览历史就退一步，没有历史但在看某个页面就先回到搜书首页 */
+        if (WA.stack.length || WA.lastUrl) {
+          const wb = $('#wa-back');
+          if (wb) { wb.click(); return true; }
+        }
+        setView('shelf');
         return true;
       }
       if (S.view !== 'shelf') { setView('shelf'); return true; }
