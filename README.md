@@ -8,7 +8,7 @@
 
 **下载**（都在本仓库 [Releases](https://github.com/RoutineMiku/MoRead-Windows/releases)）：
 - Windows：`MoRead-win32-x64.zip`，解压后双击 `墨读.exe` 即可，免安装、不写注册表、数据跟着程序走
-- 安卓：[`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.4.1-android/MoRead-android.apk)，直接安装（WebView 内置 Node 兼容层，桌面/安卓共用同一套阅读与书源逻辑）
+- 安卓：[`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.4.2-android/MoRead-android.apk)，直接安装（WebView 内置 Node 兼容层，桌面/安卓共用同一套阅读与书源逻辑）
 - 网页版（iOS / iPad / 任意浏览器）：**<https://routinemiku.github.io/MoRead-Windows/>** — 免安装、免账号，iPhone 上用 Safari 打开后「分享 → 添加到主屏幕」，就得到全屏独立图标
 
 ![书架](docs/screenshots/shot_shelf.png)
@@ -44,6 +44,14 @@ export default {
 部署后把地址（形如 `https://xxx.workers.dev/?url=`）填进「设置 → 书源代理地址」即可。留空 = 纯本地模式。
 
 **注意**：网页版数据存在浏览器里，清理「网站数据」/ 无痕模式会连同书架一起清掉；重要书籍建议用设置里的「导出备份 zip」留一份。
+
+### 换手机 / 换电脑怎么搬
+
+1. 旧设备：设置 → 备份与恢复 → **完整备份（含本地书文件）** → 完整导出，得到一个 zip（本地书的正文也在里面）
+2. 新设备：设置 → 备份与恢复 → **从备份恢复** → 选择文件 → 「合并进现有书架」
+3. 打开书架上的书接着读，进度会跟过来
+
+只导「导出备份 zip」（不含本地书）也能搬书架、书源、书签和进度，但本地书点开会提示正文缺失——重新导入一次原 txt / epub 即可。恢复完成时如果缺正文，界面会直接告诉你有几本、怎么补。
 
 <img src="docs/screenshots/web/web_phone_shelf.png" width="300" alt="网页版手机书架" /> <img src="docs/screenshots/web/web_desktop_shelf.png" width="520" alt="网页版桌面书架" />
 
