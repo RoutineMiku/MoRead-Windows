@@ -6,7 +6,9 @@
 > 这个项目按 Legado 的使用习惯重写了一版 Windows 桌面端：**本地书 + Legado 书源 + 网页搜书 + 坚果云同步**，
 > 存档格式与原版「阅读」双向兼容，可以直接导入原版「阅读」导出的 zip 备份。
 
-**下载**：本仓库 Releases 里的 `MoRead-win32-x64.zip`，解压后双击 `墨读.exe` 即可，免安装、不写注册表、数据跟着程序走。
+**下载**（都在本仓库 [Releases](https://github.com/RoutineMiku/MoRead-Windows/releases)）：
+- Windows：`MoRead-win32-x64.zip`，解压后双击 `墨读.exe` 即可，免安装、不写注册表、数据跟着程序走
+- 安卓：[`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.4.1-android/MoRead-android.apk)，直接安装（WebView 内置 Node 兼容层，桌面/安卓共用同一套阅读与书源逻辑）
 
 ![书架](docs/screenshots/shot_shelf.png)
 
