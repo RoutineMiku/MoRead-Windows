@@ -936,3 +936,22 @@ html[data-layout="portrait"] .row-card .act{width:100%;justify-content:flex-end;
 html[data-layout="portrait"] .row-card .act .btn{min-height:36px;padding:0 12px;}
 html[data-layout="portrait"] .src-url{white-space:normal;overflow-wrap:anywhere;}
 html[data-layout="portrait"] .src-rules{flex-wrap:wrap;row-gap:6px;}
+
+/* ---------------- 网页版空书架引导 ---------------- */
+
+.empty.web-start{padding:34px 18px;line-height:1.6;}
+
+.web-start b{display:block;font-size:16px;color:var(--text);margin-bottom:6px;}
+
+.web-start p{max-width:430px;margin:0 auto 16px;color:var(--muted);font-size:13px;line-height:1.75;}
+
+.web-start-btns{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:6px;}
+
+.web-start-btns .btn{min-height:40px;padding:0 16px;font-size:13px;}
+
+.web-start p.web-start-tip{margin:14px auto 0;font-size:12px;color:var(--faint);}
+
+html[data-layout] .web-start-btns{flex-direction:column;}
+
+html[data-layout] .web-start-btns .btn{width:100%;}
+.web-note{margin:2px 0 14px;padding:10px 12px;border-radius:8px;background:#fff8e6;border:1px solid #f0dfae;color:#7a5c14;font-size:12px;line-height:1.7;}

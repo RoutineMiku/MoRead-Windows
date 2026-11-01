@@ -383,6 +383,13 @@
           if (FS.delete(p)) { markDirty(p); return { ok: true }; }
           return { error: 'ENOENT: ' + p };
         }
+        /* 网页版没有"外部路径"这个概念：用户选的文件在 pickFiles 里就已经读进虚拟 FS 了，
+           所以 stage 直接确认存在并原样返回。缺这一条时，恢复备份 / 导入书源 JSON
+           都会在第一步就抛「无法读取所选文件」。 */
+        case 'stage': {
+          if (FS.has(p) || isDir(p)) return { path: p };
+          return { error: 'ENOENT: ' + p };
+        }
         case 'abs': return { abs: '' };   // 网页版没有真实文件路径，fs shim 会走 readFileSync 兜底
         default: return { error: '未知文件操作: ' + op };
       }
