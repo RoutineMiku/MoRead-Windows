@@ -406,6 +406,10 @@
         ? '点右上角 <b>导入</b> 选手机里的 txt / epub，或去「书源」搜网络小说。'
         : '拖入 TXT / EPUB，或去「书源」搜索网络小说。'}</div>`);
 
+    /* 网页版空书架已经有引导卡，底部那条「拖进窗口」的提示是重复的，先收起来 */
+    const dh = $('.drop-hint');
+    if (dh) dh.style.display = (IS_WEB && !st.books.length) ? 'none' : '';
+
     /* 网页版空书架的三个入口 */
     $$('#books [data-start]').forEach(btn => {
       btn.onclick = () => {
