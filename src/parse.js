@@ -79,6 +79,10 @@ const IMG_MIME = {
   '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bmp': 'image/bmp'
 };
 const IMG_MAX_BYTES = 12 * 1024 * 1024;
+/* 整本预算：章节正文（含图片）会整本驻留内存（parsedCache + cache/parsed/<id>.json）。
+   图多的书（漫画 epub 常见上百 MB）不设上限会把 WebView / Electron 撑爆，
+   超预算的图不内嵌，正文照常可读。40MB 够放两三百张普通插图。 */
+const IMG_BUDGET_BYTES = 40 * 1024 * 1024;
 
 function bytesToBase64(bytes) {
   if (typeof Buffer !== 'undefined' && Buffer.from) return Buffer.from(bytes).toString('base64');
@@ -185,6 +189,7 @@ function parseEpub(buf) {
   const byHref = {};
   for (const it of Object.values(manifest)) if (it.type) byHref[it.href] = it.type;
   const imgCache = new Map();
+  let imgBudget = IMG_BUDGET_BYTES;
   const makeResolver = base => tag => {
     const src = attr(tag, 'src');
     if (!src || /^[a-z]+:/i.test(src)) return null;   // 外链图片离线本来也读不到
@@ -198,12 +203,14 @@ function parseEpub(buf) {
     const href = cands.find(c => zip.has(c));
     if (!href) return null;
     if (imgCache.has(href)) return imgCache.get(href);
+    if (imgBudget <= 0) return null;
     const data = zip.read(href);
-    if (!data || !data.length || data.length > IMG_MAX_BYTES) return null;
+    if (!data || !data.length || data.length > IMG_MAX_BYTES || data.length > imgBudget) return null;
     const ext = path.posix.extname(href).toLowerCase();
     const mime = (byHref[href] && /^image\//.test(byHref[href]) ? byHref[href] : null) || IMG_MIME[ext];
     if (!mime) return null;
     const url = 'data:' + mime + ';base64,' + bytesToBase64(data);
+    imgBudget -= Math.round(data.length * 4 / 3);   // base64 约膨胀 4/3，按实际占用扣
     imgCache.set(href, url);
     return url;
   };
