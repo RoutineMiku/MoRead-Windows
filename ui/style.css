@@ -729,15 +729,31 @@ html[data-layout="portrait"] .shelf-tool{height:32px;padding:0 9px;}
 /* 手机上一行最多放两本，「大」再放大就变成一本一行、封面撑满整屏。
    这里让「大」真的走单列大图，但把封面收到 250px 以内，不撑破版面。
    只在窄屏生效：平板竖屏依旧按 auto-fill 自然分列。 */
+/* 兜底：脚本还没跑（或老版本 WebView 禁用 JS 的极端情况）时按视口宽度分列。
+   注意 :not([data-cols]) —— 只要脚本算出了列数，这里就整套让位，
+   免得「媒体查询 440px」和「脚本算的列数」互相打架。 */
 @media (max-width: 440px) {
   /* 1fr 的最小值是 auto，而书名的 white-space:nowrap 会让最小内容宽度等于整行书名，
      于是「小」的三列被撑成 363/256/231px、总宽 872px 溢出 383px 的容器，
      第三本直接跑到屏幕外。必须显式 minmax(0,1fr) 把最小宽度压回 0。 */
-  html[data-layout="portrait"] .grid{grid-template-columns:repeat(2,minmax(0,1fr));}
-  html[data-layout="portrait"][data-shelf-size="sm"] .grid{grid-template-columns:repeat(3,minmax(0,1fr));}
-  html[data-layout="portrait"][data-shelf-size="lg"] .grid{grid-template-columns:minmax(0,1fr);justify-items:center;}
-  html[data-layout="portrait"][data-shelf-size="lg"] .book{width:min(72vw,250px);}
+  html[data-layout="portrait"] .grid:not([data-cols]){grid-template-columns:repeat(2,minmax(0,1fr));}
+  html[data-layout="portrait"][data-shelf-size="sm"] .grid:not([data-cols]){grid-template-columns:repeat(3,minmax(0,1fr));}
+  html[data-layout="portrait"][data-shelf-size="lg"] .grid:not([data-cols]){grid-template-columns:minmax(0,1fr);justify-items:center;}
+  html[data-layout="portrait"][data-shelf-size="lg"] .grid:not([data-cols]) .book{width:min(72vw,250px);}
 }
+
+/* ---- 书架列数：由脚本按书架真实可用宽度算，写进 data-cols ----
+   为什么不用媒体查询：手机 CSS 宽度从 320 到 600 都有（1272 物理像素的手机
+   在 2.6～3.0 倍 DPR 下是 424～490 CSS px），把断点钉在 440 就会出现
+   「441～600px 的机器掉回 auto-fill」——那一档正是用户截图里一本占大半屏的样子。
+   脚本按容器宽度 + 封面档位算，任何 DPR / 分屏 / 折叠屏都对得上。 */
+.grid[data-cols="2"]{grid-template-columns:repeat(2,minmax(0,1fr));}
+.grid[data-cols="3"]{grid-template-columns:repeat(3,minmax(0,1fr));}
+.grid[data-cols="4"]{grid-template-columns:repeat(4,minmax(0,1fr));}
+.grid[data-cols="1"]{grid-template-columns:minmax(0,1fr);justify-items:center;}
+.grid[data-cols="1"] .book{width:min(72vw,250px);}
+/* 列宽固定后，卡内文字必须能收，否则书名/章节名会把卡片顶出去 */
+.grid[data-cols] .book{min-width:0;max-width:100%;}
 /* 分组按钮不许被压缩，否则「＋ 新分组」只剩「＋ 分」 */
 html[data-layout] .tabs > button{flex:0 0 auto;white-space:nowrap;}
 /* 393px 宽的机器上五个分组按钮刚好差 30px 放不下，收一点内边距就不用滑了 */

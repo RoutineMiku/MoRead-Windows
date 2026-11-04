@@ -411,6 +411,35 @@
     }[key] || byRecent;
     return list.slice().sort(cmp);
   }
+  /* 书架的列数按「书架实际可用宽度」算，不交给媒体查询。
+     手机的 CSS 宽度 = 物理像素 / DPR，同一块屏从 320 到 600 都可能：
+     1272px 的机器在 3.0 倍下是 424，在 2.6 倍下是 489。断点钉在 440 时，
+     441～600 那一档会掉回 auto-fill，列宽随书名长度乱涨（用户截图里
+     一本就占了 72% 屏宽）。这里直接量容器宽度，任何 DPR/分屏都对得上。 */
+  function shelfColsFor(w, key) {
+    if (!w) return 0;
+    if (w < 560) return key === 'sm' ? 3 : key === 'md' ? 2 : 1;
+    /* 竖屏平板 / 横屏手机：多给一列，但别退回 auto-fill（书名一长就散） */
+    if (document.documentElement.getAttribute('data-layout') && w < 880) {
+      return key === 'sm' ? 4 : key === 'md' ? 3 : 2;
+    }
+    return 0; // 桌面窗口：沿用 auto-fill，一行能放几本放几本
+  }
+  function applyShelfCols() {
+    const grid = $('#books');
+    if (!grid) return;
+    const w = Math.round(grid.getBoundingClientRect().width);
+    const n = shelfColsFor(w, shelfSizeKey());
+    if (n) grid.setAttribute('data-cols', String(n));
+    else grid.removeAttribute('data-cols');
+  }
+  let colsT = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(colsT);
+    colsT = setTimeout(applyShelfCols, 90);
+  });
+  window.addEventListener('orientationchange', () => setTimeout(applyShelfCols, 160));
+
   function applyShelfPrefs() {
     const st = S.state && S.state.settings;
     if (!st) return;
@@ -419,6 +448,7 @@
     if (sl) sl.textContent = (SHELF_SORTS.find(x => x.k === shelfSortKey()) || SHELF_SORTS[0]).name;
     const zl = $('#shelf-size-label');
     if (zl) zl.textContent = (SHELF_SIZES.find(x => x.k === shelfSizeKey()) || SHELF_SIZES[1]).name;
+    applyShelfCols();
   }
 
   function shelfOptions(kind) {
@@ -594,6 +624,9 @@
       e.stopPropagation();
       bookMenu(btn.dataset.menu);
     });
+
+    /* 书卡都进 DOM 之后量一次容器宽度定列数（此时布局已完成，量得准） */
+    applyShelfCols();
   }
 
   function bookMenu(id) {
