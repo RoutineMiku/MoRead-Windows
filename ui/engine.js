@@ -455,6 +455,9 @@
 
     const listRule = src.ruleSearch.bookList;
     let cards = [];
+    /* loose：列表规则没选中任何节点，退化成「整页当一张卡片」。
+       这种结果能凑出一堆链接，但未必真是书，检测/换源都要区别对待。 */
+    let loose = false;
     if (listRule) {
       if (/^\$/.test(listRule) && json) {
         const arr = jsonPathAll(json, listRule) || [];
@@ -466,6 +469,7 @@
     if (!cards.length && root) {
       // 兜底：整页当作一张卡片
       cards = [root.body || root];
+      loose = true;
     }
 
     const out = [];
@@ -486,7 +490,8 @@
         kind: first(src.ruleSearch.kind, cctx),
         lastChapter: first(src.ruleSearch.lastChapter, cctx),
         sourceId: src.id,
-        sourceName: src.name
+        sourceName: src.name,
+        loose
       });
     }
     return out;

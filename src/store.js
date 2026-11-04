@@ -35,6 +35,13 @@ function defaults() {
       closeToTray: false,
       maxConcurrent: 3,
       searchLimit: 40,
+      /* 书架：排序方式与封面大小（都是纯展示偏好，换设备/恢复备份时一起带走） */
+      shelfSort: 'recent',
+      shelfSize: 'md',
+      /* 换源：一次最多搜多少个源 */
+      switchLimit: 24,
+      /* 书源检测并发数：0 = 按设备自动（手机 5 / 电脑 8） */
+      detectConc: 0,
       autoCacheNext: true,
       tts: { voiceURI: '', rate: 1, pitch: 1, autoNext: true },
       webdav: {
