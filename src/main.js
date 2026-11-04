@@ -41,8 +41,11 @@ function rlog(...args) {
 
 /* ---------------- 窗口 ---------------- */
 function createWindow() {
+  /* 自动化验证用：MOREAD_WIN=390x844 时按指定尺寸开窗（模拟手机竖屏） */
+  const ms = (process.env.MOREAD_WIN || '').match(/^(\d+)x(\d+)$/);
   win = new BrowserWindow({
-    width: 1200, height: 800, minWidth: 980, minHeight: 640,
+    width: ms ? +ms[1] : 1200, height: ms ? +ms[2] : 800,
+    minWidth: ms ? 300 : 980, minHeight: ms ? 400 : 640,
     frame: false, backgroundColor: '#eef0f4', show: false,
     icon: fs.existsSync(path.join(ROOT, 'build', 'icon.ico')) ? path.join(ROOT, 'build', 'icon.ico') : undefined,
     webPreferences: {
@@ -129,7 +132,10 @@ function createTray() {
 function bookCacheDir(id) {
   return path.join(store.dirs().cacheDir, String(id));
 }
-function parsedPath(id) { return path.join(bookCacheDir(id), 'parsed.json'); }
+function parsedPath(id) {
+  // v2：EPUB 图片支持上线后解析结果含 data URL 图片段，换名让老书重新解析一次
+  return path.join(bookCacheDir(id), 'parsed.v2.json');
+}
 
 function loadParsed(book) {
   if (parsedCache.has(book.id)) return parsedCache.get(book.id);

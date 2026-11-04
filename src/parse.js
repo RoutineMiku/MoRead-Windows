@@ -69,16 +69,50 @@ function decodeEntities(s) {
   });
 }
 
-function htmlToParas(html) {
+/* 图片段落约定：正文段落数组里的字符串若以 data:image/ 开头，就是一个内嵌图片
+ * （完整 data URL）。渲染层按它画 <img>，分页/朗读/字数统计都要跟着处理。
+ * 放 data URL 而不是文件路径，是因为解析结果只落在 cache/parsed/<id>.json，
+ * 不进 data.json，也不依赖各端如何寻址本地文件。 */
+const IMG_SENTINEL = '\u0001';
+const IMG_MIME = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bmp': 'image/bmp'
+};
+const IMG_MAX_BYTES = 12 * 1024 * 1024;
+
+function bytesToBase64(bytes) {
+  if (typeof Buffer !== 'undefined' && Buffer.from) return Buffer.from(bytes).toString('base64');
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+}
+
+function htmlToParas(html, imgResolver) {
   let s = html
     .replace(/<\?xml[\s\S]*?\?>/gi, '')
     .replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '');
+  /* <img> 先换成「整行独占的占位符」再剥标签，之后把占位行还原成 data URL 段落。
+     内联在文字中间的小图也接受换行拆段：电子书里图片几乎总是独立成段。 */
+  if (imgResolver) {
+    s = s.replace(/<img\b[^>]*\/?>/gi, tag => {
+      const url = imgResolver(tag);
+      return url ? '\n' + IMG_SENTINEL + url + IMG_SENTINEL + '\n' : '\n';
+    });
+  }
   s = s.replace(/<br\s*\/?>/gi, '\n');
   s = s.replace(/<\/(p|div|h[1-6]|li|tr|blockquote|section)>/gi, '\n');
   s = s.replace(/<[^>]+>/g, '');
   s = decodeEntities(s);
-  return toParas(s);
+  return toParas(s)
+    .map(p => {
+      if (p.charCodeAt(0) !== 1) return p;
+      const url = p.slice(1, -1);
+      return url && /^data:image\//.test(url) ? url : null;
+    })
+    .filter(p => p !== null && p.length > 0);
 }
 
 function attr(tag, name) {
@@ -146,6 +180,34 @@ function parseEpub(buf) {
   }
 
   const chapters = [];
+  /* 图片提取：按 manifest 的 media-type 认类型，manifest 里没有就按扩展名猜。
+     同一本书图片往往被多个章节引用（页眉 logo 等），按 href 去重免得重复转 base64。 */
+  const byHref = {};
+  for (const it of Object.values(manifest)) if (it.type) byHref[it.href] = it.type;
+  const imgCache = new Map();
+  const makeResolver = base => tag => {
+    const src = attr(tag, 'src');
+    if (!src || /^[a-z]+:/i.test(src)) return null;   // 外链图片离线本来也读不到
+    const clean = src.split('#')[0];
+    if (!clean) return null;
+    const dir = path.posix.dirname(base);
+    const cands = [...new Set([
+      path.posix.normalize(path.posix.join(dir, decodeURIComponent(clean))).replace(/^\.\//, ''),
+      path.posix.normalize(path.posix.join(dir, clean)).replace(/^\.\//, '')
+    ])];
+    const href = cands.find(c => zip.has(c));
+    if (!href) return null;
+    if (imgCache.has(href)) return imgCache.get(href);
+    const data = zip.read(href);
+    if (!data || !data.length || data.length > IMG_MAX_BYTES) return null;
+    const ext = path.posix.extname(href).toLowerCase();
+    const mime = (byHref[href] && /^image\//.test(byHref[href]) ? byHref[href] : null) || IMG_MIME[ext];
+    if (!mime) return null;
+    const url = 'data:' + mime + ';base64,' + bytesToBase64(data);
+    imgCache.set(href, url);
+    return url;
+  };
+
   spine.forEach(item => {
     if (!zip.has(item.href)) return;
     const html = zip.readText(item.href);
@@ -159,7 +221,7 @@ function parseEpub(buf) {
       const tm = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
       t = tm ? decodeEntities(tm[1]).trim() : null;
     }
-    const paras = htmlToParas(html);
+    const paras = htmlToParas(html, makeResolver(item.href));
     if (!paras.length) return;
     chapters.push({ title: (t || '第 ' + (chapters.length + 1) + ' 节').slice(0, 60), text: paras });
   });

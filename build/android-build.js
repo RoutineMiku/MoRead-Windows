@@ -22,9 +22,12 @@ const wantRelease = process.argv.includes('--release');
 const isWin = process.platform === 'win32';
 
 /* 构建前先把 ui/ 同步进 assets（并补 bridge.js 引用），
-   否则改了前端忘记同步，装出来的包界面是新的、功能全是死的（window.mo 不存在）。 */
+   否则改了前端忘记同步，装出来的包界面是新的、功能全是死的（window.mo 不存在）。
+   同理必须重打 nodebundle：src/*.js 与 nodepoly/runtime.js 的改动只有重新打包才进 APK，
+   漏掉这一步会出现「包能装、解析逻辑还是旧的」这种更隐蔽的问题。 */
 try {
   require('./sync-android-ui');
+  require('./gen-nodebundle');
 } catch (e) {
   console.error('同步安卓前端资源失败：' + (e && e.message));
   process.exit(1);

@@ -25,11 +25,24 @@ const H = {
   'Content-Type': 'application/json'
 };
 async function api(pathname, opt) {
-  const res = await fetch('https://api.github.com' + pathname, Object.assign({ headers: H }, opt));
-  const text = await res.text();
-  let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch (e) { json = null; }
-  return { status: res.status, json, text };
+  /* 本机网络走代理，api.github.com 偶发 502/500 / 连接被重置；单个 blob 失败就整次
+     部署报废，等 1.5s/3s/6s 重试三次，成功率足够 */
+  let last = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt) await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt - 1)));
+    try {
+      const res = await fetch('https://api.github.com' + pathname, Object.assign({ headers: H }, opt));
+      const text = await res.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch (e) { json = null; }
+      last = { status: res.status, json, text };
+      if (res.status < 500) return last;
+    } catch (e) {
+      last = { status: 0, json: null, text: String(e && e.message || e) };
+    }
+    if (attempt < 3) console.log('  重试 ' + (attempt + 1) + '/3：' + pathname + ' (' + last.status + ')');
+  }
+  return last;
 }
 
 function walk(dir, base) {

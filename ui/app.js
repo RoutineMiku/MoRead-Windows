@@ -33,6 +33,36 @@
 
   /* ---------------- 工具 ---------------- */
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  /* EPUB 图片段：解析层把 <img> 转成 data URL 整段占位（见 src/parse.js）。
+     这里负责识别与渲染；data URL 校验过结构才进 DOM，防止构造的书往里塞别的东西。 */
+  const IMG_RE = /^data:image\/(?:png|jpe?g|gif|webp|bmp|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
+  const isImgPara = p => typeof p === 'string' && p.length > 32 && p.charCodeAt(4) === 58 /* 'data:' */ && IMG_RE.test(p);
+  /* 图片限高：单图最高占阅读区 62%，保证「空页也放得下」，分页器就不会卡在
+     「一段永远装不下」的死局里。具体数值在分页/渲染时算好传进来。 */
+  const imgMaxH = () => {
+    const st = $('#r-stage');
+    return Math.max(120, Math.round((st ? st.clientHeight : 600) * 0.62));
+  };
+  const imgHtml = (p, maxH) => `<img class="r-img" style="max-height:${maxH}px" src="${p}" alt="">`;
+  const parasMap = (paras, maxH) => paras.map(p => isImgPara(p) ? imgHtml(p, maxH) : `<p>${esc(p)}</p>`).join('');
+  /* 分页前必须把本章图片预加载完：data URL 的 <img> 解码是异步的，测量盒里读
+     offsetHeight 时图还没解开，高度按 0 算，分页会把一页塞爆。加载过的图片进
+     内存缓存，测量盒里再建 <img> 就能同步量出真实尺寸。 */
+  const imgLoaded = new Map();
+  function preloadImgs(paras) {
+    const jobs = [];
+    for (const p of paras) {
+      if (!isImgPara(p) || imgLoaded.has(p)) continue;
+      imgLoaded.set(p, new Promise(res => {
+        const im = new Image();
+        im.onload = im.onerror = res;
+        im.src = p;
+        setTimeout(res, 5000);   // 坏图也不能卡住打开书
+      }));
+      jobs.push(imgLoaded.get(p));
+    }
+    return Promise.all(jobs);
+  }
   const uid = p => (p || 'X') + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   /* 网络请求取消不了，但不必一直等：超时就放弃这个源，继续下一个 */
@@ -2427,9 +2457,14 @@
 
       /* 等待期间用户可能又点了别的章节：过期的这次直接丢弃，不渲染不写状态 */
       if (seq !== R.loadSeq) return;
+      /* 本章带 EPUB 图片时先把图加载完再渲染：分页测量依赖图片真实尺寸 */
+      if (paras.some(isImgPara)) {
+        await preloadImgs(paras);
+        if (seq !== R.loadSeq) return;
+      }
       R.title = title;
       R.paras = paras;
-      R.chars = paras.join('').length;
+      R.chars = paras.reduce((n, p) => n + (isImgPara(p) ? 0 : p.length), 0);
       addStats(R.chars, 0);
       renderChapter(dir);
       if (pct) {
@@ -2533,9 +2568,9 @@
       sec.className = 'ch-sec';
       sec.dataset.ci = idx;
       sec.dataset.title = title;
-      sec.dataset.chars = paras.join('').length;
+      sec.dataset.chars = paras.reduce((n, p) => n + (isImgPara(p) ? 0 : p.length), 0);
       sec.innerHTML = `<div class="ch-no">${esc(b.name)} · 共 ${total} 章</div><h2>${esc(title)}</h2>` +
-        `<div class="body">${paras.map(p => `<p>${esc(p)}</p>`).join('')}</div>` + (last ? pageTailHtml() : '');
+        `<div class="body">${parasMap(paras, imgMaxH())}</div>` + (last ? pageTailHtml() : '');
       page.appendChild(sec);
       R.buf.push(idx);
       R.bufTail = idx;
@@ -2593,12 +2628,13 @@
       /* 首页显示书名 + 章节名，之后的书页只留一行轻页眉 —— 与 layoutPages 里的
          测量模板保持一致，否则每页可用高度算多了，正文会溢出到页外 */
       page.innerHTML = pageHeadHtml(R.page === 0) +
-        `<div class="body">${ps.map(p => `<p>${esc(p)}</p>`).join('')}</div>`;
+        `<div class="body">${parasMap(ps, imgMaxH())}</div>`;
       if (R.page === R.pages.length - 1) {
         page.insertAdjacentHTML('beforeend', pageTailHtml());
-        const st = $('#r-stage');
-        /* 「本章完」是装饰，放不下就省掉：宁可少一句提示，也不能让它把正文顶出屏幕 */
-        if (st && page.getBoundingClientRect().height > st.clientHeight + 2 && page.lastElementChild) {
+        /* 「本章完」是装饰，放不下就省掉：正文区被内容占满时它会被挤出页面。
+           page 高度已锁死 100%，看正文区是否溢出来判断。 */
+        const bEl = page.querySelector('.body');
+        if (bEl && bEl.scrollHeight > bEl.clientHeight + 1 && page.lastElementChild) {
           page.removeChild(page.lastElementChild);
         }
       }
@@ -2612,7 +2648,7 @@
       const last = R.ci + 1 >= (b.total || 1);
       const head = `<div class="ch-no">${esc(b.name)} · 共 ${b.total || '?'} 章</div><h2>${esc(R.title)}</h2>`;
       page.innerHTML = `<section class="ch-sec" data-ci="${R.ci}" data-title="${esc(R.title)}" data-chars="${R.chars}">` +
-        head + `<div class="body">${R.paras.map(p => `<p>${esc(p)}</p>`).join('')}</div>` +
+        head + `<div class="body">${parasMap(R.paras, imgMaxH())}</div>` +
         (last ? pageTailHtml() : '') + `</section>`;
       pageAnim(page, dir === undefined ? null : dir);
       if (dir) $('#r-stage').scrollTop = 0;
@@ -2652,8 +2688,12 @@
     const availW = Math.max(240, Math.round((page.clientWidth || stage.clientWidth) - padX));
 
     const boxStyle = `position:absolute;left:-9999px;top:0;visibility:hidden;pointer-events:none;` +
+      `height:auto;display:block;` +   // 覆盖 .mode-paged .page 的 height:100% / flex，否则量出整屏高
       `width:${availW + padX}px;padding:${padTop}px ${parseFloat(cs.paddingRight) || 0}px ${padBottom}px ${parseFloat(cs.paddingLeft) || 0}px;` +
       `max-width:none;margin:0;`;
+    /* 测量盒必须挂在 #reader 里：页眉 h2 / ch-no 的样式带 .reader.mode-paged 前缀，
+       挂在 body 下量出来的头部高度和真实渲染不一样，availH 会差出一截 */
+    const host = $('#reader') || document.body;
     const mk = inner => {
       const d = document.createElement('div');
       d.className = 'page' + (s.fontFamily !== 'serif' ? ' nofamily' : '');
@@ -2662,7 +2702,10 @@
       d.style.setProperty('--r-lh', s.lineHeight);
       d.style.setProperty('--para-gap', measPadV(s));
       d.innerHTML = inner;
-      document.body.appendChild(d);
+      /* 正文区在真实页里是 flex 容器（竖向摊开），测量盒要还原成块级流，
+         否则段落高度相加的口径和渲染时不一致 */
+      d.querySelectorAll('.body').forEach(b => { b.style.display = 'block'; b.style.flex = 'none'; });
+      host.appendChild(d);
       return d;
     };
 
@@ -2676,7 +2719,7 @@
     const baseOf = first => {
       const d = mk(pageHeadHtml(first) + '<div class="body"></div>');
       const h = d.offsetHeight;
-      document.body.removeChild(d);
+      host.removeChild(d);
       return h;
     };
     const baseNext = baseOf(false);
@@ -2701,13 +2744,17 @@
     const box = mk('');
     const bEl = document.createElement('div');
     bEl.className = 'body';
+    bEl.style.cssText = 'display:block;flex:none;';   // 与 mk 里同理：还原块级流
     box.appendChild(bEl);
     const mb = el => parseFloat(getComputedStyle(el).marginBottom) || 0;
     const els = R.paras.map(t => {
-      const p = document.createElement('p');
-      p.textContent = t;
-      bEl.appendChild(p);
-      return p;
+      /* EPUB 图片段：建 <img> 量真实高度（进测量盒前已 preload，见 preloadImgs）。
+         CSS 与正文段落同样只有下外边距，相邻段高度可直接相加。 */
+      const el = document.createElement(isImgPara(t) ? 'img' : 'p');
+      if (isImgPara(t)) { el.className = 'r-img'; el.style.maxHeight = imgMaxH() + 'px'; el.src = t; }
+      else el.textContent = t;
+      bEl.appendChild(el);
+      return el;
     });
     /* 段落只有下外边距、无上外边距，相邻段高度可直接相加 */
     const MB = els.length ? mb(els[0]) : 0;
@@ -2749,6 +2796,9 @@
       if (!sp) { sp = document.createElement('p'); bEl.appendChild(sp); }
       let rest = R.paras[i], guard = 0;
       while (rest && guard++ < 400) {
+        /* 图片没有「行」的概念，截断逻辑不适用：整张塞进当前空页（限高已保证
+           空页放得下），走下一轮。正常流程到不了这里，纯防御。 */
+        if (isImgPara(rest)) { pages[cur].push(rest); used = Math.min(whole, availH); break; }
         sp.textContent = rest;
         const full = sp.offsetHeight + MB;
         if (full <= availH + 0.5) { pages[cur].push(rest); used = full; rest = ''; break; }
@@ -2764,7 +2814,7 @@
     }
     if (sp) sp.remove();
     if (pages.length > 1 && !pages[pages.length - 1].length) pages.pop();
-    document.body.removeChild(box);
+    host.removeChild(box);
 
     /* ---- 第三步：逐页实测兜底 ----
      * 上面靠「页眉/页脚高度估算」算可用高度，窄高屏上仍可能差几十像素（末页的
@@ -2781,7 +2831,7 @@
         const overOf = (arr, first, last) => {
           probe.innerHTML = pageHeadHtml(first) + '<div class="body"></div>' + (last ? pageTailHtml() : '');
           const b = probe.querySelector('.body');
-          b.innerHTML = arr.map(t => `<p>${esc(t)}</p>`).join('');
+          b.innerHTML = parasMap(arr, imgMaxH());
           return probe.scrollHeight - probe.clientHeight;
         };
         let budget = Math.max(30, pages.length * 6);
@@ -2969,12 +3019,12 @@
     let pct = 0, text = '';
     if (s.pageMode === 'paged') {
       pct = R.pages.length > 1 ? R.page / (R.pages.length - 1) : 0;
-      text = (R.pages[R.page] || [''])[0].slice(0, 60);
+      text = ((R.pages[R.page] || []).find(p => !isImgPara(p)) || '').slice(0, 60);
     } else {
       const stage = $('#r-stage');
       const max = stage.scrollHeight - stage.clientHeight;
       pct = max > 10 ? stage.scrollTop / max : 0;
-      text = (R.paras[0] || '').slice(0, 60);
+      text = (R.paras.find(p => !isImgPara(p)) || '').slice(0, 60);
     }
     const exist = S.state.bookmarks.find(x => x.bookId === b.id && x.ci === R.ci);
     if (exist) { toast('这一章已经加过书签了'); return; }
@@ -3559,7 +3609,8 @@
       addWebBook, srcForBook, switchSource, applyLegado, addOnlineBook,
       setView, renderShelf, get state() { return S.state; },
       get reader() { return R; },
-      openReader, loadChapter, runSearch, ttsVoices, ttsOrderedVoices, pickSearchSources
+      openReader, loadChapter, runSearch, ttsVoices, ttsOrderedVoices, pickSearchSources,
+      doImport   // 自动化导入用：绕过 pickBooks（contextBridge 对象不可改写）
     };
   }
   // 逐个隔离：任何一步出错只丢它自己的功能，绝不能把整个 app.js 的初始化带走。
