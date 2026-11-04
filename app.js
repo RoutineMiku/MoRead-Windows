@@ -239,6 +239,9 @@
       renderShelf();
     }));
 
+    on('#shelf-sort', () => shelfOptions('sort'));
+    on('#shelf-size', () => shelfOptions('size'));
+
     bindDropZone();
     bindKeys();
   }
@@ -357,6 +360,94 @@
     return clamp(Math.round((p.ci / b.total) * 100), 0, 100);
   }
 
+  /* ---------------- 书架排序 / 封面大小 ---------------- */
+  const SHELF_SORTS = [
+    { k: 'recent', name: '最近阅读', hint: '刚读过的在前，没读过的按加入时间排' },
+    { k: 'added', name: '最近加入', hint: '刚加进书架的在最前' },
+    { k: 'name', name: '书名', hint: '按书名排，中文按拼音，数字按大小' },
+    { k: 'author', name: '作者', hint: '同一个作者的书集中在一起' },
+    { k: 'progress', name: '阅读进度', hint: '读得多的、快读完的在前' },
+    { k: 'updated', name: '最近更新', hint: '目录刚更新过的在线书在前' }
+  ];
+  const SHELF_SIZES = [
+    { k: 'sm', name: '小', hint: '一屏放更多，适合书多的时候' },
+    { k: 'md', name: '中', hint: '默认大小，手机上每行两本' },
+    { k: 'lg', name: '大', hint: '封面更大，书名更清楚' }
+  ];
+  let zhCollator = null;
+  function zhCompare(a, b) {
+    if (!zhCollator) {
+      try { zhCollator = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: 'base' }); }
+      catch (e) { zhCollator = null; }
+    }
+    return zhCollator ? zhCollator.compare(a, b) : String(a).localeCompare(String(b));
+  }
+  const shelfSortKey = () => {
+    const k = S.state.settings.shelfSort;
+    return SHELF_SORTS.some(x => x.k === k) ? k : 'recent';
+  };
+  const shelfSizeKey = () => {
+    const k = S.state.settings.shelfSize;
+    return SHELF_SIZES.some(x => x.k === k) ? k : 'md';
+  };
+  /* 书架只做展示排序，不改动存档里 books 的顺序（导出的书架文件顺序保持原样） */
+  function sortBooks(list) {
+    const pct = b => pctOf(b);
+    /* 旧存档只有 progress.at，没有 book.readAt：两种都认，「最近阅读」才不会把老书全排到后面 */
+    const lastRead = b => b.readAt || (progressOf(b.id) && progressOf(b.id).at) || 0;
+    const byRecent = (a, b) => lastRead(b) - lastRead(a) || (b.createdAt || 0) - (a.createdAt || 0);
+    const key = shelfSortKey();
+    const cmp = {
+      recent: byRecent,
+      added: (a, b) => (b.createdAt || 0) - (a.createdAt || 0) || zhCompare(a.name || '', b.name || ''),
+      name: (a, b) => zhCompare(a.name || '', b.name || ''),
+      author: (a, b) => zhCompare(a.author || '佚名', b.author || '佚名') || zhCompare(a.name || '', b.name || ''),
+      progress: (a, b) => pct(b) - pct(a) || byRecent(a, b),
+      updated: (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || byRecent(a, b)
+    }[key] || byRecent;
+    return list.slice().sort(cmp);
+  }
+  function applyShelfPrefs() {
+    const st = S.state && S.state.settings;
+    if (!st) return;
+    document.documentElement.setAttribute('data-shelf-size', shelfSizeKey());
+    const sl = $('#shelf-sort-label');
+    if (sl) sl.textContent = (SHELF_SORTS.find(x => x.k === shelfSortKey()) || SHELF_SORTS[0]).name;
+    const zl = $('#shelf-size-label');
+    if (zl) zl.textContent = (SHELF_SIZES.find(x => x.k === shelfSizeKey()) || SHELF_SIZES[1]).name;
+  }
+
+  function shelfOptions(kind) {
+    const s = S.state.settings;
+    const isSort = kind === 'sort';
+    const list = isSort ? SHELF_SORTS : SHELF_SIZES;
+    const cur = isSort ? shelfSortKey() : shelfSizeKey();
+    openModal(`<h3>${isSort ? '书籍排序' : '封面大小'}</h3>
+      <p class="desc">${isSort ? '书架按这个顺序排列，选一次以后都记住（分组内同样生效）。' : '只改书架上的展示大小，不影响正文。'}</p>
+      <div class="opt-list" id="opt-list">
+        ${list.map(o => `<button class="opt ${o.k === cur ? 'on' : ''}" data-k="${o.k}">
+          ${isSort ? '' : `<span class="opt-prev prev-${o.k}"><i></i></span>`}
+          <span class="opt-body"><b>${o.name}</b><small>${o.hint}</small></span>
+          <span class="opt-tick">✓</span>
+        </button>`).join('')}
+      </div>
+      <div class="modal-actions"><button class="btn" onclick="window.__closeModal()">关闭</button></div>`);
+    $$('#opt-list .opt').forEach(el => el.onclick = () => {
+      const k = el.dataset.k;
+      if (isSort) {
+        s.shelfSort = k;
+        toast('已按「' + (SHELF_SORTS.find(x => x.k === k) || {}).name + '」排序');
+      } else {
+        s.shelfSize = k;
+        toast('封面大小：' + (SHELF_SIZES.find(x => x.k === k) || {}).name);
+      }
+      applyShelfPrefs();
+      save(true);
+      closeModal();
+      renderShelf();
+    });
+  }
+
   function renderShelf() {
     const st = S.state;
     const reading = st.books.filter(b => progressOf(b.id) && (progressOf(b.id).ci || 0) < (b.total || 1)).length;
@@ -410,6 +501,8 @@
     else if (S.filter === 'online') list = list.filter(b => b.kind !== 'local');
     if (S.group === 'none') list = list.filter(b => !b.groupId || b.groupId === 'g_default');
     else if (S.group !== 'all') list = list.filter(b => b.groupId === S.group);
+    /* 排序只作用于当前筛选结果：分组/本地/在线筛选后依旧按用户选的顺序排 */
+    list = sortBooks(list);
 
     $('#books').innerHTML = list.map(b => {
       const p = progressOf(b.id);
@@ -1434,6 +1527,13 @@
     /* 关键词要短：用整本书名会让很多源搜不到，被误判成「较差」 */
     const defKw = '剑';
     const done = st.sources.filter(s => s.quality).length;
+    /* 并发不是越大越快：安卓桥的线程池有限，8 个 worker 只会排队，
+       还更容易被站点限流、被误判成「无用」。手机默认 5，电脑 8。 */
+    const maxConc = isAndroidApp() ? 8 : 16;
+    const defConc = clamp(Number(st.settings.detectConc) || (isAndroidApp() ? 5 : 8), 1, maxConc);
+    /* 老存档里这个字段叫 qualityAt，新的是 qAt，两种都认 */
+    const qAtOf = s => s.qAt || s.qualityAt || 0;
+    const freshN = st.sources.filter(s => qAtOf(s) && Date.now() - qAtOf(s) < 3 * 86400e3).length;
 
     openModal(`
       <h3>书源自动检测</h3>
@@ -1453,14 +1553,18 @@
           <input id="dt-kw" value="${esc(defKw)}" placeholder="常见字或书名" />
         </div>
         <div class="field">
-          <label>并发数 <span id="dt-conc-n">8</span></label>
-          <input type="range" id="dt-conc" min="4" max="16" value="8" />
+          <label>并发数 <span id="dt-conc-n">${defConc}</span>${isAndroidApp() ? '<span>手机建议 4~6</span>' : ''}</label>
+          <input type="range" id="dt-conc" min="2" max="${maxConc}" value="${defConc}" />
         </div>
         <div class="field full">
           <label class="cb"><input type="checkbox" id="dt-deep" checked /> 深度检测：抓目录和正文（更准，每个源多花几秒）</label>
         </div>
+        <div class="field full">
+          <label class="cb"><input type="checkbox" id="dt-fresh" checked /> 跳过 3 天内检测过的（${freshN} 个，重测请取消）</label>
+        </div>
       </div>
       ${done ? `<p class="desc" style="margin-top:12px">已检测过 ${done} 个，再次检测会覆盖旧结果。</p>` : ''}
+      <p class="desc">判定口径：站点打不开才算「无用」；站点能打开但搜不到 / 规则不适配，只算「较差」。</p>
       <div class="modal-actions">
         <button class="btn" id="dt-cancel">取消</button>
         <button class="btn primary" id="dt-start">开始检测</button>
@@ -1479,10 +1583,22 @@
     const kw = ($('#dt-kw').value || '').trim() || '剑';
     const deep = $('#dt-deep').checked;
     const conc = +$('#dt-conc').value || 8;
+    const skipFresh = $('#dt-fresh').checked;
+    st.settings.detectConc = conc;
+    save();
 
     let targets = scope === 'filtered' ? srcFiltered() : scope === 'enabled' ? st.sources.filter(s => s.enabled) : st.sources.slice();
     targets = targets.filter(s => s.url || s.searchUrl);
-    if (!targets.length) { toast('没有可检测的书源'); return; }
+    const before = targets.length;
+    if (skipFresh) {
+      const cutoff = Date.now() - 3 * 86400e3;
+      targets = targets.filter(s => { const t = s.qAt || s.qualityAt || 0; return !t || t < cutoff; });
+    }
+    const skippedFresh = before - targets.length;
+    if (!targets.length) {
+      toast(skippedFresh ? `${skippedFresh} 个书源都是 3 天内检测过的，取消「跳过」可重测` : '没有可检测的书源');
+      return;
+    }
 
     /* 书架里用过的源，直接拿那本书的地址深检，比搜索关键词更靠谱 */
     const probe = new Map();
@@ -1494,7 +1610,7 @@
     $('#dt-scope').disabled = true;
     live.innerHTML = `
       <div class="dt-bar"><i id="dt-bar-i"></i></div>
-      <div class="dt-line"><span id="dt-cur">准备中…</span><span id="dt-count">0 / ${targets.length}</span></div>
+      <div class="dt-line"><span id="dt-cur">准备中…</span><span id="dt-count">0 / ${targets.length}${skippedFresh ? ` · 跳过 ${skippedFresh} 个新测过的` : ''}</span></div>
       <div class="dt-tags">
         ${['great', 'ok', 'poor', 'dead'].map(k => `<span class="chip q-${k}" id="dt-n-${k}">${Q_NAME[k]} 0</span>`).join('')}
       </div>
@@ -1509,7 +1625,7 @@
       keyword: kw,
       deep,
       concurrency: conc,
-      timeout: 9000,
+      timeout: isAndroidApp() ? 7000 : 8000,
       probeUrlOf: s => probe.get(s.id) || '',
       shouldStop: () => detectAbort,
       onProgress: (done, total, sum, r) => {
@@ -1519,13 +1635,18 @@
         const cur = $('#dt-cur');
         if (cur) cur.textContent = `${done}/${total} · ${r.name.slice(0, 18)} → ${Q_NAME[r.quality] || ''}${r.note ? '（' + r.note + '）' : ''}`;
         const c = $('#dt-count');
-        if (c) c.textContent = `${done} / ${total}`;
+        if (c) {
+          const sec = Math.max(1, Math.round((Date.now() - t0) / 1000));
+          const left = done > 0 ? Math.max(0, Math.round(sec / done * (total - done))) : 0;
+          c.textContent = `${done} / ${total} · 已用 ${sec}s${done > 0 && left ? ` · 约剩 ${left}s` : ''}${skippedFresh ? ` · 跳过 ${skippedFresh}` : ''}`;
+        }
         for (const k of ['great', 'ok', 'poor', 'dead']) {
           const el = $('#dt-n-' + k);
           if (el) el.textContent = `${Q_NAME[k]} ${sum[k] || 0}`;
         }
-        /* 增量落盘，避免中断后白测 */
-        if (done - lastSave >= 15) { lastSave = done; save(true); }
+        /* 增量落盘，避免中断后白测。安卓端写盘是同步的，每 30 个写一次，
+           几千个书源时不会因为反复序列化整份存档而拖慢检测。 */
+        if (done - lastSave >= 30) { lastSave = done; save(true); }
       },
       onResult: r => {
         const s = sourceById(r.id);
@@ -1553,7 +1674,7 @@
           <span class="chip q-poor">较差 ${res.summary.poor || 0}</span>
           <span class="chip q-dead">无用 ${res.summary.dead || 0}</span>
         </div>
-        <p class="desc">共测 ${res.total} 个${res.stopped ? '（已中断）' : ''}，用时 ${sec} 秒${deep ? '' : '（未深检，只测了搜索）'}。</p>
+        <p class="desc">共测 ${res.total} 个${skippedFresh ? `（跳过 ${skippedFresh} 个 3 天内测过的）` : ''}${res.stopped ? '（已中断）' : ''}，用时 ${sec} 秒${deep ? '' : '（未深检，只测了搜索）'}。</p>
       </div>
       <div class="modal-actions">
         <button class="btn" id="dt-group">按质量分组</button>
@@ -1862,6 +1983,12 @@
             <div class="seg" id="s-slimit">${[20, 40, 80, 200].map(n => `<button data-v="${n}" class="${(s.searchLimit || 40) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
           <div class="row"><div class="rl">阅读时自动预取下一章</div>
             <div class="switch ${s.autoCacheNext ? 'on' : ''}" data-set="autoCacheNext"><i></i></div></div>
+          <div class="row"><div class="rl">书架排序<small>也可以直接在书架右上角切换</small></div>
+            <select class="w-engine" id="s-shelf-sort">${SHELF_SORTS.map(o => `<option value="${o.k}" ${shelfSortKey() === o.k ? 'selected' : ''}>${o.name}</option>`).join('')}</select></div>
+          <div class="row"><div class="rl">封面大小<small>书架上一本书占多大</small></div>
+            <div class="seg" id="s-shelf-size">${SHELF_SIZES.map(o => `<button data-v="${o.k}" class="${shelfSizeKey() === o.k ? 'on' : ''}">${o.name}</button>`).join('')}</div></div>
+          <div class="row"><div class="rl">换源时搜索的书源数<small>越多越容易找到同名书，但更慢</small></div>
+            <div class="seg" id="s-swlimit">${[12, 24, 48].map(n => `<button data-v="${n}" class="${(s.switchLimit || 24) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
           <div class="row"><div class="rl">数据目录<small>${esc(S.info.paths.root)}</small></div>
             ${IS_ANDROID ? '' : '<button class="link" id="open-dir">打开</button>'}</div>
           ${S.info.platform === 'web' ? `<div class="row"><div class="rl">书源代理地址<small>网页版默认不发起任何网络请求（数据不出设备）。填入你自部署的代理服务后可用在线书源与搜书；留空只能读本地书</small></div>
@@ -1965,6 +2092,19 @@
     $$('#s-slimit button').forEach(b => b.onclick = () => {
       $$('#s-slimit button').forEach(x => x.classList.remove('on'));
       b.classList.add('on'); s.searchLimit = +b.dataset.v; save();
+    });
+    if ($('#s-shelf-sort')) $('#s-shelf-sort').onchange = e => {
+      s.shelfSort = e.target.value;
+      applyShelfPrefs(); save(true); renderShelf();
+    };
+    $$('#s-shelf-size button').forEach(b => b.onclick = () => {
+      $$('#s-shelf-size button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on'); s.shelfSize = b.dataset.v;
+      applyShelfPrefs(); save(true); renderShelf();
+    });
+    $$('#s-swlimit button').forEach(b => b.onclick = () => {
+      $$('#s-swlimit button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on'); s.switchLimit = +b.dataset.v; save();
     });
     $$('[data-set]').forEach(el => el.onclick = () => {
       const k = el.dataset.set;
@@ -2324,6 +2464,7 @@
     $('#r-mode').textContent = s.pageMode === 'paged' ? '翻页' : '滚动';
     $('#r-font').textContent = s.fontFamily === 'serif' ? '宋体' : '黑体';
     $('#r-fs-num').textContent = s.fontSize;
+    applyShelfPrefs();
   }
 
   function applyReaderStyle() {
@@ -3215,67 +3356,151 @@
       .replace(/[\s·、,，.。:：\-—_()（）\[\]【】]/g, '').toLowerCase();
   }
 
+  /* 换源时同一个关键词会在多个源上反复搜：10 分钟内直接复用结果，
+     第二次打开换源基本是立刻出列表，不用再等一轮网络。 */
+  const SEARCH_MEMO = new Map();
+  const MEMO_TTL = 10 * 60e3;
+  function memoSearch(src, kw) {
+    const k = src.id + '|' + kw;
+    const m = SEARCH_MEMO.get(k);
+    if (m && Date.now() - m.at < MEMO_TTL) return Promise.resolve(m.hits);
+    /* 请求本身也要带超时：JS 这边 7 秒就放弃等它了，但底层连接不会跟着取消，
+       安卓上会一直占着桥线程到默认的 18 秒 —— 并发一高就全在排队。 */
+    const net = u => mo.net(Object.assign({ timeout: 8000 }, u));
+    const p = Engine.search(net, src, kw).then(hits => {
+      if (SEARCH_MEMO.size > 400) SEARCH_MEMO.clear();
+      SEARCH_MEMO.set(k, { at: Date.now(), hits });
+      return hits;
+    });
+    /* withTimeout 会先放手，底层请求失败时别冒成未处理的 rejection */
+    p.catch(() => {});
+    return p;
+  }
+
   async function switchSource() {
     const b = R.book || (S.state.books.find(x => x.id === S.switchBookId));
     if (!b) return;
-    /* 检测为「无用」的源直接跳过：换源本来就慢，不要把时间浪费在打不开的站上 */
+    /* 检测为「无用」的源永远跳过：换源本来就慢，不要把时间浪费在打不开的站上 */
     const enabled = S.state.sources.filter(s => s.enabled && s.searchUrl);
-    const alive = enabled.length > 8 ? enabled.filter(s => s.quality !== 'dead') : enabled;
-    const all = alive.length ? alive : enabled;
-    if (!all.length) { toast('没有启用的网络书源，先去「书源」里启用'); return; }
-    // 书源可能有几千个，全量搜太慢：按「优质 > 有效 > 书架在用」优先取一批
-    const cap = clamp(S.state.settings.searchLimit || 40, 1, 500);
-    const srcs = pickSearchSources(all, cap);
-    const skipped = enabled.length - all.length;
+    if (!enabled.length) { toast('没有启用的网络书源，先去「书源」里启用'); return; }
+    const alive = enabled.filter(s => s.quality !== 'dead');
+    const good = alive.filter(s => s.quality === 'great' || s.quality === 'ok');
+    /* 有足够多检测过的好源就只搜好源；没检测过就退回全部启用的 */
+    const pool = good.length >= 6 ? good : (alive.length ? alive : enabled);
+    const cap = clamp(S.state.settings.switchLimit || 24, 4, 120);
+    const srcs = pickSearchSources(pool, cap);
+    const srcRank = new Map(srcs.map((s, i) => [s.id, i]));
+    const skipped = enabled.length - srcs.length;
+    const conc = isAndroidApp() ? 5 : 8;
 
     openModal(`<h3>换源 · ${esc(b.name)}</h3>
-      <p class="desc">在 ${srcs.length} 个书源里找同名书（共启用 ${enabled.length} 个${skipped > 0 ? `，已跳过 ${skipped} 个检测为「无用」的源` : ''}）${srcs.length < all.length ? '，可在设置里调整上限' : ''}。<br>当前读到：${esc(R.title || '未开始')}（第 ${(R.ci || 0) + 1} 章）</p>
-      <div class="sw-list" id="sw-list"><div class="hint">搜索中…</div></div>
+      <p class="desc">在 ${srcs.length} 个书源里找同名书（共启用 ${enabled.length} 个，优先检测过的优质源${skipped > 0 ? `，本次不搜 ${skipped} 个` : ''}）。<br>当前读到：${esc(R.title || '未开始')}（第 ${(R.ci || 0) + 1} 章）</p>
+      <div class="sw-prog"><span id="sw-prog-t">准备搜索…</span><button class="link" id="sw-stop">停止</button></div>
+      <div class="sw-list searching" id="sw-list"><div class="hint" id="sw-hint">搜索中…</div></div>
       <div class="modal-actions"><button class="btn" onclick="window.__closeModal()">关闭</button></div>`, true);
 
-    const hits = [];
-    const kw = b.name;
-    const limit = clamp(Math.max(S.state.settings.maxConcurrent || 3, 4), 1, 8);
-    let cursor = 0;
-    const worker = async () => {
-      while (cursor < srcs.length) {
-        if (hits.length >= 12) return; // 够用了就别再扫，省时间
-        const s = srcs[cursor++];
-        try {
-          const r = await withTimeout(Engine.search(mo.net, s, kw), 8000);
-          for (const x of r) {
-            const a = normChapTitle(x.name), t = normChapTitle(kw);
-            if (a === t || a.includes(t) || t.includes(a)) hits.push(x);
-          }
-        } catch (e) { /* 单个源失败不影响其他 */ }
-        paintSwitch(hits, b);
-      }
-    };
-    await Promise.all(Array.from({ length: limit }, worker));
-    paintSwitch(hits, b, true);
-  }
-
-  function paintSwitch(hits, b, done) {
     const box = $('#sw-list');
-    if (!box) return;
-    if (!hits.length) {
-      box.innerHTML = done ? `<div class="hint">没有找到同名书。换个关键词，或去「网页」里手动找。</div>` : `<div class="hint">搜索中…</div>`;
-      return;
-    }
-    box.innerHTML = hits.slice(0, 40).map((r, i) => `
-      <div class="sw-item ${r.sourceId === b.sourceId ? 'cur' : ''}">
+    const hits = [];
+    const keys = new Set();
+    const kw = b.name;
+    const t0 = Date.now();
+    let cursor = 0, done = 0, stopped = false, finished = false;
+
+    const rowHtml = r => {
+      const cur = r.sourceId === b.sourceId;
+      const q = (sourceById(r.sourceId) || {}).quality;
+      const key = r.sourceId + '|' + r.bookUrl;
+      return `<div class="sw-item ${cur ? 'cur' : ''}" data-key="${esc(key)}">
         <div class="sw-ico">${esc((r.sourceName || '源')[0])}</div>
         <div class="sw-body">
-          <div class="sw-t">${esc(r.name)}<span class="chip">${esc(r.sourceName || '')}</span>${r.sourceId === b.sourceId ? '<span class="chip on">当前源</span>' : ''}</div>
+          <div class="sw-t">${esc(r.name)}<span class="chip">${esc(r.sourceName || '')}</span>${q ? `<span class="chip q-${q}">${Q_NAME[q] || ''}</span>` : ''}${cur ? '<span class="chip on">当前源</span>' : ''}</div>
           <div class="sw-s">${esc(r.author || '佚名')}${r.lastChapter ? ' · ' + esc(r.lastChapter) : ''}</div>
         </div>
-        <button class="btn sm ${r.sourceId === b.sourceId ? '' : 'primary'}" data-sw="${i}" ${r.sourceId === b.sourceId ? 'disabled' : ''}>切到这本</button>
-      </div>`).join('') + (done ? '' : `<div class="hint">继续搜索中…</div>`);
-    $$('[data-sw]').forEach(el => el.onclick = () => applySwitch(hits[+el.dataset.sw], el));
+        <button class="btn sm ${cur ? '' : 'primary'}" data-sw="${esc(key)}" ${cur ? 'disabled' : ''}>${cur ? '当前' : '切到这本'}</button>
+      </div>`;
+    };
+    /* 搜索过程中只往列表尾部追加，绝不整体重排 —— 这就是「列表不停跳动」的根因。
+       全部搜完后按 质量 → 书源优先级 排一次，用户点的时候顺序已经稳定。 */
+    const appendHits = list => {
+      const h = $('#sw-hint');
+      if (h) h.remove();
+      box.insertAdjacentHTML('beforeend', list.map(rowHtml).join(''));
+    };
+    const qrank = r => {
+      const q = (sourceById(r.sourceId) || {}).quality;
+      return q === 'great' ? 0 : q === 'ok' ? 1 : q === 'poor' ? 3 : q ? 4 : 2;
+    };
+    const sortHits = () => hits.sort((x, y) =>
+      (qrank(x) - qrank(y)) ||
+      ((srcRank.get(x.sourceId) ?? 999) - (srcRank.get(y.sourceId) ?? 999)) ||
+      String(x.name).localeCompare(String(y.name)));
+    const progress = () => {
+      const el = $('#sw-prog-t');
+      if (!el) return;
+      const sec = Math.max(0, Math.round((Date.now() - t0) / 1000));
+      const left = done > 0 ? Math.max(0, Math.round(sec / done * (srcs.length - done))) : 0;
+      el.textContent = finished
+        ? `已搜 ${done}/${srcs.length} 个源，找到 ${hits.length} 本 · 用时 ${sec}s${hits.length >= 12 ? ' · 够用了，提前结束' : ''}${hits.length ? '' : '（换个关键词或去网页里手动找）'}`
+        : `已搜 ${done}/${srcs.length} · 找到 ${hits.length} 本 · 约剩 ${left}s`;
+    };
+
+    $('#sw-stop').onclick = () => {
+      stopped = true;
+      const el = $('#sw-prog-t');
+      if (el) el.textContent = '正在停止…';
+    };
+    box.addEventListener('click', e => {
+      const btn = e.target.closest('[data-sw]');
+      if (!btn) return;
+      const key = btn.dataset.sw;
+      const r = hits.find(h => h.sourceId + '|' + h.bookUrl === key);
+      if (r) applySwitch(r, btn);
+    });
+
+    const worker = async () => {
+      while (true) {
+        if (stopped || hits.length >= 12) return;
+        /* 弹窗关掉（或已经切到别的源）就别再搜了：安卓上继续跑只会拖慢后面的章节加载 */
+        if (!document.body.contains(box) || !$('#modal').classList.contains('open')) return;
+        const i = cursor++;
+        if (i >= srcs.length) return;
+        const s = srcs[i];
+        try {
+          const r = await withTimeout(memoSearch(s, kw), 7000);
+          const fresh = [];
+          for (const x of r) {
+            /* 整页兜底解析出来的「结果」多数不是书，换源列表里只会添乱 */
+            if (x.loose) continue;
+            const a = normChapTitle(x.name), t = normChapTitle(kw);
+            if (!(a === t || a.includes(t) || t.includes(a))) continue;
+            const key = x.sourceId + '|' + x.bookUrl;
+            if (keys.has(key)) continue;
+            keys.add(key);
+            hits.push(x);
+            fresh.push(x);
+          }
+          if (fresh.length) appendHits(fresh);
+        } catch (e) { /* 单个源失败不影响其他 */ }
+        done++;
+        progress();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(conc, srcs.length) }, worker));
+    finished = true;
+    sortHits();
+    if (document.body.contains(box)) {
+      box.classList.remove('searching');
+      box.innerHTML = hits.length
+        ? hits.map(rowHtml).join('')
+        : `<div class="hint">没有找到同名书。换个关键词，或去「网页」里手动找。</div>`;
+      const st = $('#sw-stop');
+      if (st) st.remove();
+      progress();
+    }
   }
 
   async function applySwitch(r, btn) {
-    const b = R.book;
+    const b = R.book || S.state.books.find(x => x.id === S.switchBookId);
     if (!b) return;
     const src = sourceById(r.sourceId);
     if (!src) return toast('书源不存在');

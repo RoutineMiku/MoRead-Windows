@@ -128,6 +128,15 @@ input,select,textarea{font-family:inherit;font-size:13px;color:inherit;}
 
 .shelf-head{display:flex;align-items:center;gap:12px;margin:20px 32px 12px;}
 .shelf-head .line{flex:1;height:1px;background:var(--line);}
+.shelf-tools{display:flex;gap:6px;align-items:center;}
+.shelf-tool{
+  height:30px;padding:0 10px;border:1px solid var(--line);background:#fff;border-radius:8px;
+  color:#5c6472;font-size:12px;display:inline-flex;align-items:center;gap:5px;box-shadow:var(--shadow-sm);
+  white-space:nowrap;
+}
+.shelf-tool svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:0 0 14px;}
+.shelf-tool:hover{color:var(--text);border-color:#d6dbe3;}
+.shelf-tool:active{background:#f5f7fa;}
 .tabs{display:flex;gap:2px;flex-wrap:wrap;max-width:70%;}
 .tabs button{
   padding:5px 11px;border-radius:8px;font-size:12.5px;color:#5c6472;white-space:nowrap;
@@ -139,7 +148,15 @@ input,select,textarea{font-family:inherit;font-size:13px;color:inherit;}
 .seg button{padding:4px 10px;border-radius:6px;font-size:12px;color:#5c6472;}
 .seg button.on{background:#fff;color:var(--text);box-shadow:var(--shadow-sm);font-weight:550;}
 
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:22px 18px;padding:0 32px 8px;}
+/* 书架封面大小：--shelf-base 由版式决定，--shelf-scale 由用户在「封面大小」里选 */
+.grid{
+  --shelf-base:124px;--shelf-scale:1;
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(var(--shelf-base) * var(--shelf-scale)),1fr));
+  gap:22px 18px;padding:0 32px 8px;
+}
+html[data-shelf-size="sm"] .grid{--shelf-scale:.76;}
+html[data-shelf-size="md"] .grid{--shelf-scale:1;}
+html[data-shelf-size="lg"] .grid{--shelf-scale:1.34;}
 .book{cursor:pointer;position:relative;}
 .cover{
   position:relative;aspect-ratio:3/4.15;border-radius:5px 8px 8px 5px;overflow:hidden;
@@ -375,6 +392,25 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 .modal h3{margin:0 0 4px;font-size:16px;}
 .modal .desc{color:var(--muted);font-size:12.5px;margin:0 0 16px;line-height:1.7;}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;}
+/* 书架排序 / 封面大小：整行可点的选项 */
+.opt-list{display:flex;flex-direction:column;gap:8px;margin:4px 0 2px;}
+.opt{
+  display:flex;align-items:center;gap:12px;text-align:left;padding:11px 13px;
+  border:1px solid var(--line);border-radius:11px;background:#fff;transition:.12s;
+}
+.opt:hover{border-color:#d3d9e3;box-shadow:var(--shadow-sm);}
+.opt.on{border-color:#9db8e6;background:#f3f7ff;}
+.opt-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.opt-body b{font-size:13.5px;font-weight:600;}
+.opt-body small{color:var(--faint);font-size:11.5px;line-height:1.45;}
+.opt-tick{color:var(--accent);font-weight:700;opacity:0;flex:0 0 auto;}
+.opt.on .opt-tick{opacity:1;}
+.opt-prev{width:38px;flex:0 0 38px;display:grid;place-items:center;}
+.opt-prev i{display:block;background:linear-gradient(150deg,#8fa6c6,#5b7ba6);border-radius:3px 5px 5px 3px;
+  box-shadow:0 2px 5px -2px rgba(16,24,40,.4);}
+.prev-sm i{width:18px;height:25px;}
+.prev-md i{width:24px;height:33px;}
+.prev-lg i{width:32px;height:44px;}
 .field{display:flex;flex-direction:column;gap:5px;}
 .field.full{grid-column:1/-1;}
 .field label{font-size:12px;color:#4a5260;font-weight:550;}
@@ -443,8 +479,13 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 .wp-item-a{display:flex;gap:4px;flex:0 0 auto;}
 
 /* ---------------- 换源列表 ---------------- */
-.sw-list{max-height:52vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-top:8px;}
-.sw-item{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:10px;}
+/* 搜索中固定高度：结果一条条出现时弹窗不再忽高忽低；搜完再按内容收紧 */
+.sw-list{overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.sw-list.searching{height:min(46vh,320px);}
+.sw-prog{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;
+  font-size:12px;color:var(--muted);background:#f6f8fb;border-radius:8px;padding:7px 10px;}
+.sw-prog .link{flex:0 0 auto;font-size:12px;}
+.sw-item{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:10px;flex:0 0 auto;}
 .sw-item.cur{background:#f7f9fc;}
 .sw-ico{width:30px;height:30px;flex:0 0 30px;border-radius:8px;display:grid;place-items:center;
   background:var(--accent-soft);color:#2a5bb8;font-size:13px;font-weight:600;}
@@ -507,7 +548,10 @@ input[type=range]{accent-color:var(--accent);}
 .chip.q-poor{background:#fdf6e7;border-color:#f2e3c2;color:#8a6413;}
 .chip.q-dead{background:#fdeeee;border-color:#f4d4d4;color:#a63b3b;}
 .field input[type=range]{height:auto;padding:0;background:none;border:none;box-shadow:none;}
-.field input[type=range]:focus{box-shadow:none;border:none;background:none;}
+/* 轨道：上面几处把 background 清成 transparent 后，滑块只剩一个小圆点，看不出范围 */
+.field input[type=range]{height:4px;background:#e3e7ec;border-radius:4px;margin:10px 0 6px;}
+html[data-layout] .field input[type=range]{width:100%;}
+.field input[type=range]:focus{box-shadow:none;border:none;background:#e3e7ec;}
 .field label.cb{display:flex;align-items:center;gap:8px;font-weight:400;color:var(--text);cursor:pointer;}
 .field label.cb input{width:15px;height:15px;}
 
@@ -661,7 +705,7 @@ html[data-layout="portrait"] .searchbox{width:auto;flex:1 1 auto;height:40px;min
 html[data-layout="portrait"] .head-tools .btn{padding:0 12px;white-space:nowrap;}
 
 /* 书卡三列：96px 起步会挤成五列，书名只剩两个字，点也点不准 */
-html[data-layout="portrait"] .grid{grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:16px 11px;padding:0 14px 8px;}
+html[data-layout="portrait"] .grid{--shelf-base:148px;gap:16px 11px;padding:0 14px 8px;}
 /* 分组 tabs 和「全/本地/在线」共 6 个控件，393px 宽一行塞不下：分组被压成「+ 分」。
    改成两行 —— 分组占满第一行（可横滑），范围筛选靠右放第二行。 */
 html[data-layout="portrait"] .shelf-head{margin:12px 0 8px;padding:0 14px;gap:6px 8px;flex-wrap:wrap;}
@@ -670,6 +714,15 @@ html[data-layout="portrait"] .shelf-head .tabs{flex:1 1 100%;min-width:0;max-wid
 html[data-layout="portrait"] .shelf-head .tabs::-webkit-scrollbar{display:none;}
 html[data-layout="portrait"] .shelf-head .line{display:none;}
 html[data-layout="portrait"] .shelf-head .seg{margin-left:auto;}
+html[data-layout="portrait"] .shelf-tool{height:32px;padding:0 9px;}
+/* 手机上一行最多放两本，「大」再放大就变成一本一行、封面撑满整屏。
+   这里让「大」真的走单列大图，但把封面收到 250px 以内，不撑破版面。
+   只在窄屏生效：平板竖屏依旧按 auto-fill 自然分列。 */
+@media (max-width: 440px) {
+  html[data-layout="portrait"][data-shelf-size="sm"] .grid{grid-template-columns:repeat(3,1fr);}
+  html[data-layout="portrait"][data-shelf-size="lg"] .grid{grid-template-columns:1fr;justify-items:center;}
+  html[data-layout="portrait"][data-shelf-size="lg"] .book{width:min(72vw,250px);}
+}
 /* 分组按钮不许被压缩，否则「＋ 新分组」只剩「＋ 分」 */
 html[data-layout] .tabs > button{flex:0 0 auto;white-space:nowrap;}
 /* 393px 宽的机器上五个分组按钮刚好差 30px 放不下，收一点内边距就不用滑了 */
@@ -701,9 +754,9 @@ html[data-layout] .row:has(> .inp) > .inp{flex:1 1 100%;width:100%;height:40px;f
 html[data-layout] .row > .rl{min-width:5.5em;}
 
 /* 横屏 / 展开态：内容区收紧一点，利用好横向空间 */
-html[data-layout="landscape"] .grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:18px 14px;padding:0 20px 8px;}
+html[data-layout="landscape"] .grid{--shelf-base:120px;gap:18px 14px;padding:0 20px 8px;}
 html[data-layout="landscape"] .page-head{padding:14px 20px 10px;}
-html[data-layout="wide"] .grid{grid-template-columns:repeat(auto-fill,minmax(132px,1fr));}
+html[data-layout="wide"] .grid{--shelf-base:132px;}
 html[data-layout="wide"] .page-head{padding:16px 28px 12px;}
 
 /* ---------------- 弹窗：竖屏做成底部抽屉，更顺手 ---------------- */
@@ -773,8 +826,8 @@ html[data-layout] .rg-tools{padding-bottom:calc(10px + var(--sa-bottom));}
 /* ---------------- 竖屏大屏（平板 / 折叠屏展开后竖向握持） ----------------
  * 导航仍在底部——竖向握持时底部比侧边顺手；只是把栅格放宽、正文居中限宽，
  * 免得 800dp 宽的屏幕上还挤着三列卡片、一行字拉到一百多个字。 */
-html[data-layout="portrait"][data-sw="medium"] .grid{grid-template-columns:repeat(auto-fill,minmax(158px,1fr));}
-html[data-layout="portrait"][data-sw="expanded"] .grid{grid-template-columns:repeat(auto-fill,minmax(168px,1fr));}
+html[data-layout="portrait"][data-sw="medium"] .grid{--shelf-base:158px;}
+html[data-layout="portrait"][data-sw="expanded"] .grid{--shelf-base:168px;}
 /* 七个入口在大屏上别被拉得太宽，居中收一收 */
 html[data-layout="portrait"][data-sw="medium"] .rail-btn,
 html[data-layout="portrait"][data-sw="expanded"] .rail-btn{max-width:104px;}
