@@ -281,10 +281,15 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
    （约 58 字/行），窄屏自动退化成满宽，宽屏只留适度白边，避免长行难读。
    JS 分页时读的就是这里的 computed padding，所以测量值与实际渲染必然一致。 */
 .reader.mode-paged .page{
-  max-width:none;width:100%;overflow:hidden;
+  max-width:none;width:100%;height:100%;overflow:hidden;
+  display:flex;flex-direction:column;
   padding-block:30px 38px;
   padding-inline:max(26px, calc((100% - var(--page-max, 1100px)) / 2));
 }
+/* 正文区撑满页内剩余高度，段落按 space-between 竖向摊开：
+   手机上一段就有五六行，按段落边界分页时页底平均要剩小半段（实测 120~160px），
+   白着很难看。把余白匀进段间距，每页都像纸书一样顶天立地。 */
+.reader.mode-paged .page .body{flex:1;display:flex;flex-direction:column;justify-content:space-between;}
 .reader.mode-paged .page h2{font-size:27px;margin:9px 0 26px;}
 /* 手机横屏（高度很矮）时压缩上下留白，否则一页只放得下两行 */
 @media (max-height: 520px){
@@ -742,6 +747,9 @@ html[data-layout] #reader.bars-off .page{
 /* 滚动模式整章一口气渲染：让浏览器跳过屏外段落的排版与绘制，长章滑动不卡。
    只限定在 #reader 里且非翻页模式 —— 分页的离屏测量盒挂在 body 下，不能被波及。 */
 #reader:not(.mode-paged) .page .body p{content-visibility:auto;contain-intrinsic-size:auto 3.2em;}
+/* EPUB 内嵌图：与正文段落同样只有下外边距（分页器按「高度+下边距」相加），
+   限高由 JS 按阅读区高度算好写在行内，保证空页一定放得下单张图。 */
+.page .body .r-img{display:block;max-width:100%;margin:0 auto var(--para-gap,1em);}
 html[data-layout="portrait"] .page{padding:26px 18px 96px;max-width:100%;}
 html[data-layout="portrait"] .page h2{font-size:22px;margin:8px 0 24px;}
 html[data-layout="portrait"] .rb-row{gap:7px;}
