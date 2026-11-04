@@ -157,7 +157,16 @@ input,select,textarea{font-family:inherit;font-size:13px;color:inherit;}
 html[data-shelf-size="sm"] .grid{--shelf-scale:.76;}
 html[data-shelf-size="md"] .grid{--shelf-scale:1;}
 html[data-shelf-size="lg"] .grid{--shelf-scale:1.34;}
-.book{cursor:pointer;position:relative;}
+/* 小档封面只有 94～111px 宽，正文竖排得整体缩一档，否则书名会被卡片边缘裁掉 */
+html[data-shelf-size="sm"] .cover{padding:9px 8px 8px;}
+html[data-shelf-size="sm"] .cover .ct{font-size:11.5px;letter-spacing:.4px;margin-left:3px;margin-bottom:10px;}
+html[data-shelf-size="sm"] .cover .ct.long{font-size:10px;letter-spacing:0;}
+html[data-shelf-size="sm"] .cover .ct.xlong{font-size:9px;line-height:1.25;}
+html[data-shelf-size="sm"] .cover .ca{font-size:9px;margin-left:4px;}
+html[data-shelf-size="sm"] .cover .tagline{font-size:8px;padding:1px 4px;right:6px;bottom:6px;}
+html[data-shelf-size="sm"] .book .bt{font-size:11.5px;margin-top:6px;}
+html[data-shelf-size="sm"] .book .bm{font-size:10px;}
+.book{cursor:pointer;position:relative;min-width:0;}
 .cover{
   position:relative;aspect-ratio:3/4.15;border-radius:5px 8px 8px 5px;overflow:hidden;
   display:flex;flex-direction:column;padding:12px 10px 11px;color:#fff;
@@ -182,6 +191,8 @@ html[data-shelf-size="lg"] .grid{--shelf-scale:1.34;}
 .cover .tagline{position:absolute;right:8px;bottom:9px;font-size:9px;letter-spacing:1px;
   background:rgba(0,0,0,.3);padding:2px 5px;border-radius:4px;}
 .cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+/* 有真实封面图时，图里通常已经有书名，再叠一层竖排字会糊成一团 */
+.cover.has-img .ct,.cover.has-img .ca{display:none;}
 .book:hover .cover{transform:translateY(-4px);box-shadow:0 16px 28px -12px rgba(16,24,40,.55);}
 .book .bt{margin-top:8px;font-size:12.5px;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .book .bm{font-size:11px;color:var(--faint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -719,8 +730,12 @@ html[data-layout="portrait"] .shelf-tool{height:32px;padding:0 9px;}
    这里让「大」真的走单列大图，但把封面收到 250px 以内，不撑破版面。
    只在窄屏生效：平板竖屏依旧按 auto-fill 自然分列。 */
 @media (max-width: 440px) {
-  html[data-layout="portrait"][data-shelf-size="sm"] .grid{grid-template-columns:repeat(3,1fr);}
-  html[data-layout="portrait"][data-shelf-size="lg"] .grid{grid-template-columns:1fr;justify-items:center;}
+  /* 1fr 的最小值是 auto，而书名的 white-space:nowrap 会让最小内容宽度等于整行书名，
+     于是「小」的三列被撑成 363/256/231px、总宽 872px 溢出 383px 的容器，
+     第三本直接跑到屏幕外。必须显式 minmax(0,1fr) 把最小宽度压回 0。 */
+  html[data-layout="portrait"] .grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+  html[data-layout="portrait"][data-shelf-size="sm"] .grid{grid-template-columns:repeat(3,minmax(0,1fr));}
+  html[data-layout="portrait"][data-shelf-size="lg"] .grid{grid-template-columns:minmax(0,1fr);justify-items:center;}
   html[data-layout="portrait"][data-shelf-size="lg"] .book{width:min(72vw,250px);}
 }
 /* 分组按钮不许被压缩，否则「＋ 新分组」只剩「＋ 分」 */

@@ -343,10 +343,14 @@
   function coverHTML(b) {
     const g = gradOf(b.name || '');
     const tag = b.kind === 'local' ? (b.ext === '.epub' ? 'EPUB' : 'TXT') : (b.kind === 'web' ? '网页' : '在线');
-    const img = b.cover ? `<img src="${esc(b.cover)}" onerror="this.style.display='none'">` : '';
+    /* 有封面图时不再叠竖排书名和作者：小档封面只有 111px 宽，两套文字会互相压住，
+       而且大多数封面图本身就带书名。图挂了就摘掉 has-img，文字自动回来。 */
+    const img = b.cover
+      ? `<img src="${esc(b.cover)}" alt="" onerror="this.parentNode.classList.remove('has-img');this.style.display='none'">`
+      : '';
     const len = (b.name || '').length;
     const cls = len > 12 ? 'ct xlong' : len > 8 ? 'ct long' : 'ct';
-    return `<div class="cover" style="background:linear-gradient(150deg,${g[0]},${g[1]})">
+    return `<div class="cover ${img ? 'has-img' : ''}" style="background:linear-gradient(150deg,${g[0]},${g[1]})">
       ${img}
       <div class="${cls}">${esc(b.name || '')}</div>
       <div class="ca">${esc(b.author || '')}</div>
