@@ -9,6 +9,8 @@
   /* 安卓版：bridge.js 会把 Node 兼容层挂到 window.MoNative 上 */
   /* 网页版桌面浏览器（MoNativeBridge.__isWebDesktop）跑桌面版式，不算安卓形态 */
   const IS_ANDROID = !!window.MoNative && !(window.MoNativeBridge && window.MoNativeBridge.__isWebDesktop);
+  /* 网页版跑在自建网关上时，存档落在服务器（dataStore='device'），而不是只在本浏览器 */
+  const onDeviceStore = () => !!(S.info && S.info.platform === 'web' && S.info.dataStore === 'device');
   /* 浏览器里跑的版本（手机/电脑都算）：没有"文件路径"、没有拖放，交互要更明确一些 */
   const IS_WEB = !!(window.MoNativeBridge && window.MoNativeBridge.__isWeb);
   const layoutMode = () => document.documentElement.getAttribute('data-layout') || '';
@@ -551,13 +553,17 @@
     }).join('') || (IS_WEB
       ? `<div class="empty web-start" style="grid-column:1/-1">
           <b>书架还是空的</b>
-          <p>书、书源、阅读进度都存在你这台设备的浏览器里，不会上传到任何服务器。</p>
+          <p>${onDeviceStore()
+            ? '书、书源、阅读进度都存在这台机器上，家里任何设备打开都能看到同一份。'
+            : '书、书源、阅读进度都存在你这台设备的浏览器里，不会上传到任何服务器。'}</p>
           <div class="web-start-btns">
             <button class="btn primary" data-start="import">导入本地书（TXT / EPUB）</button>
             <button class="btn" data-start="restore">从备份文件恢复</button>
             <button class="btn" data-start="source">去书源找网络小说</button>
           </div>
-          <p class="web-start-tip">换设备、或清理过浏览器数据后，用「从备份文件恢复」把书架和进度找回来。</p>
+          <p class="web-start-tip">${onDeviceStore()
+            ? '从手机「阅读」App 或墨读导出的备份，在这里恢复一次就永久留在服务器上。'
+            : '换设备、或清理过浏览器数据后，用「从备份文件恢复」把书架和进度找回来。'}</p>
         </div>`
       : `<div class="empty" style="grid-column:1/-1">书架还是空的。<br>${isAndroidApp()
         ? '点右上角 <b>导入</b> 选手机里的 txt / epub，或去「书源」搜网络小说。'
@@ -1763,16 +1769,33 @@
   }
 
   function normalizeMany(json) {
-    const arr = Array.isArray(json) ? json : (json && json.bookSources) ? json.bookSources : [json];
+    let arr = [];
+    if (Array.isArray(json)) arr = json;
+    else if (json && typeof json === 'object') {
+      for (const k of ['bookSource', 'bookSources', 'sources', 'data', 'bookSourceList']) {
+        if (Array.isArray(json[k])) { arr = json[k]; break; }
+      }
+    }
+    if (!arr.length) arr = [json];
     return arr.filter(x => x && (x.bookSourceName || x.name)).map(Engine.normalizeSource);
   }
 
   function mergeSources(list) {
     let added = 0, updated = 0;
+    /* 按站点地址去重：同一个书源改过名字、或 url 多一个尾部斜杠，
+       以前会因为 name 不匹配而被重复添加，导几次就堆出几十条。
+       先建索引：手机备份动辄两三千个书源，逐个 find 是 O(n²)，会卡到像死机。 */
+    const norm = u => String(u || '').trim().replace(/\/+$/, '').toLowerCase();
+    const idx = new Map();
+    for (const s of S.state.sources) {
+      const k = norm(s.url);
+      if (k && !idx.has(k)) idx.set(k, s);
+    }
     for (const s of list) {
-      const old = S.state.sources.find(x => x.url && x.url === s.url && x.name === s.name);
+      const key = norm(s.url);
+      const old = key ? idx.get(key) : null;
       if (old) { Object.assign(old, s, { id: old.id, enabled: old.enabled }); updated++; }
-      else { S.state.sources.push(s); added++; }
+      else { S.state.sources.push(s); added++; if (key) idx.set(key, s); }
     }
     save(true);
     renderSources();
@@ -2026,22 +2049,24 @@
             <div class="seg" id="s-shelf-size">${SHELF_SIZES.map(o => `<button data-v="${o.k}" class="${shelfSizeKey() === o.k ? 'on' : ''}">${o.name}</button>`).join('')}</div></div>
           <div class="row"><div class="rl">换源时搜索的书源数<small>越多越容易找到同名书，但更慢</small></div>
             <div class="seg" id="s-swlimit">${[12, 24, 48].map(n => `<button data-v="${n}" class="${(s.switchLimit || 24) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
-          <div class="row"><div class="rl">数据目录<small>${esc(S.info.paths.root)}</small></div>
+          <div class="row"><div class="rl">数据目录<small>${esc(onDeviceStore() ? (S.info.dataRoot || S.info.paths.root) : S.info.paths.root)}</small></div>
             ${IS_ANDROID ? '' : '<button class="link" id="open-dir">打开</button>'}</div>
           ${S.info.platform === 'web' ? `<div class="row"><div class="rl">书源代理地址<small>网页版默认不发起任何网络请求（数据不出设备）。填入你自部署的代理服务后可用在线书源与搜书；留空只能读本地书</small></div>
-            <input class="inp" id="web-proxy" value="${esc((() => { try { return localStorage.getItem('moread.proxy') || ''; } catch (e) { return ''; } })())}" placeholder="https://你的代理地址/?url=" spellcheck="false" /></div>` : ''}
+            <input class="inp" id="web-proxy" value="${esc((() => { try { const v = localStorage.getItem('moread.proxy'); if (v) return v; const m = document.querySelector('meta[name="moread-proxy"]'); return m && m.content ? new URL(m.content, location.href).href : ''; } catch (e) { return ''; } })())}" placeholder="https://你的代理地址/?url=" spellcheck="false" /></div>` : ''}
         </div>
 
         <div class="card">
           <h3>备份与恢复 <span class="chip">含 Legado 格式</span></h3>
-          ${S.info.platform === 'web' ? `<div class="web-note">
-            数据只存在这台设备的浏览器里。清理浏览器数据、换手机、或用无痕模式打开都会丢，
-            建议每隔一阵点一次「完整导出」，把 zip 存到手机文件或网盘里。</div>` : ''}
+          ${S.info.platform === 'web' ? `<div class="web-note">${onDeviceStore()
+            ? '书、书源、阅读进度都保存在这台机器上（' + esc(S.info.dataRoot || '服务器') + '），'
+              + '家里任何设备打开都是同一份书架，清理浏览器数据也不会丢。'
+            : '数据只存在这台设备的浏览器里。清理浏览器数据、换手机、或用无痕模式打开都会丢，'
+              + '建议每隔一阵点一次「完整导出」，把 zip 存到手机文件或网盘里。'}</div>` : ''}
           <div class="row"><div class="rl">导出备份 zip<small>内含 bookSource.json / bookshelf.json / bookmark.json，原版「阅读」可直接导入这个 zip</small></div>
             <button class="btn sm" id="bk-zip">导出</button></div>
           <div class="row"><div class="rl">完整备份（含本地书文件）<small>换设备能完整还原，本地书的正文也在里面${S.info.platform === 'web' ? '——网页版推荐用这个' : ''}</small></div>
             <button class="btn sm" id="bk-zip-full">完整导出</button></div>
-          <div class="row"><div class="rl">从备份恢复<small>支持墨读 zip、原版阅读备份 zip、单个书源 JSON</small></div>
+          <div class="row"><div class="rl">从备份恢复<small>墨读 zip、原版「阅读」备份 zip、或手机导出的备份 JSON（含 bookSource / bookshelf 都行，文件名不限）；书架、书源、书签一起恢复</small></div>
             <button class="btn sm" id="bk-restore">选择文件</button></div>
           <div class="row"><div class="rl">缓存占用<small id="cache-size">计算中…</small></div>
             <button class="btn sm" id="clear-cache">清理</button></div>
@@ -2221,18 +2246,24 @@
     if (mode === 'replace') {
       st.sources = []; st.books = []; st.bookmarks = []; st.progress = {}; st.history = [];
     }
-    // 1) 书源
+    // 1) 书源（两三千年源要用索引，逐个 find 会 O(n²) 卡死）
     let srcAdded = 0, srcUpdated = 0;
+    const byUrl = new Map();
+    for (const s of st.sources) {
+      const k = normUrl(s.url);
+      if (k && !byUrl.has(k)) byUrl.set(k, s);
+    }
     for (const raw of parts.sources || []) {
       const s = Engine.normalizeSource(raw);
-      const old = st.sources.find(x => x.url && normUrl(x.url) === normUrl(s.url));
+      const k = normUrl(s.url);
+      const old = k ? byUrl.get(k) : null;
       if (old) { Object.assign(old, s, { id: old.id, enabled: old.enabled }); srcUpdated++; }
-      else { st.sources.push(s); srcAdded++; }
+      else { st.sources.push(s); srcAdded++; if (k) byUrl.set(k, s); }
     }
     // 2) 书架
     let added = 0, updated = 0, noSource = 0;
     for (const raw of parts.books || []) {
-      const src = st.sources.find(s => normUrl(s.url) === normUrl(raw.origin))
+      const src = byUrl.get(normUrl(raw.origin))
         || st.sources.find(s => s.name && s.name === raw.originName)
         || null;
       if (!src) noSource++;
@@ -2284,13 +2315,26 @@
   }
 
   async function restoreFromZip() {
-    const r = await mo.pickZip();
-    if (!r.ok) {
-      if (r.error) {
-        const more = /不是有效的 ZIP|没有识别到书源|读取失败|无法读取/.test(r.error)
-          ? '（支持：墨读备份 .zip、原版「阅读」的备份 .zip、书源 .json）' : '';
-        toast(r.error + more);
+    // 网页版在同步用户手势里先打开选择框，避免手机浏览器把异步链里的 click 静默拦掉
+    try {
+      if (typeof window.__moreadPrimeFilePicker === 'function') {
+        window.__moreadPrimeFilePicker(['application/zip', 'application/json', '*/*'], false);
       }
+    } catch (e) { /* 桌面/安卓没有这个入口，走原来的路径 */ }
+    let r;
+    try {
+      r = await mo.pickZip();
+    } catch (e) {
+      return toast('打开文件失败：' + (e && e.message || e), 6500);
+    }
+    if (!r || !r.ok) {
+      if (r && r.canceled) return;   // 用户主动取消，不打扰
+      const msg = (r && r.error) || '没有读到文件，请再试一次（或换一个备份文件）';
+      const more = /不是有效的|没有识别到|读取失败|无法读取|JSON 解析失败/.test(msg)
+        ? '。支持：墨读备份 zip、原版「阅读」备份 zip、以及任何含 bookSource / bookshelf 的 json（文件名不限）'
+        : '';
+      // 任何失败都要出声，绝不能像以前那样静默返回，让人以为按钮坏了
+      toast(msg + more, 6500);
       return;
     }
     showRestoreConfirm(r);
@@ -2301,7 +2345,7 @@
     if (!r || !r.ok) { if (r && r.error) toast(r.error); return; }
     if (r.kind === 'sources') {
       const { added, updated } = mergeSources((r.sources || []).map(Engine.normalizeSource));
-      return toast(`书源导入完成：新增 ${added}，更新 ${updated}`);
+      return toast(`书源导入完成：新增 ${added}，更新 ${updated}${onDeviceStore() ? '，已保存到这台设备' : ''}`, 4200);
     }
     const s = r.summary || {};
     const isLegado = r.kind === 'legado';
@@ -2346,7 +2390,7 @@
         if (btn) btn.onclick = () => { closeModal(); setView('shelf'); importBooks(); };
         return;
       }
-      return toast(`已恢复 ${n} 本书、${(res.state.sources || []).length} 个书源`);
+      return toast(`已恢复 ${n} 本书、${(res.state.sources || []).length} 个书源${onDeviceStore() ? '，已保存到这台设备' : ''}`, 4200);
     }
     // Legado 备份
     const counts = applyLegado(r.legado || {}, mode);
@@ -2354,7 +2398,8 @@
     applySettings();
     renderShelf(); setView('shelf');
     toast(`恢复完成：书 ${counts.added} 本、书源 ${counts.srcAdded} 个、书签 ${counts.bmAdded} 条`
-      + (counts.noSource ? `（${counts.noSource} 本没匹配到书源，阅读时可手动换源）` : ''));
+      + (counts.noSource ? `（${counts.noSource} 本没匹配到书源，阅读时可手动换源）` : '')
+      + (onDeviceStore() ? '，已保存到这台设备' : ''), 4200);
   }
 
   /* ---------------- 坚果云操作 ---------------- */
