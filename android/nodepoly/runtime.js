@@ -967,23 +967,38 @@
       } catch (e) { return { ok: false, error: e.message }; }
     },
     pickZip: async () => {
-      const r = await NB.callA('dialog.open', { mimes: ['application/zip', 'application/json', '*/*'], multiple: false, title: '选择备份（墨读 zip 或原版阅读备份）' });
-      if (!r.items || !r.items.length) return { ok: false };
-      const inner = stage(r.items[0].path);
-      const name = r.items[0].name;
+      let r;
       try {
-        if (/\.json$/i.test(name)) {
-          const text = requireImpl('fs').readFileSync(inner, 'utf8');
-          const src = legado.parseSourceFile(text);
-          if (src.ok && src.sources.length) {
-            lastZipInfo = { kind: 'sources', name };
-            return { ok: true, kind: 'sources', name, sources: src.sources, summary: { sources: src.sources.length, books: 0, bookmarks: 0 } };
-          }
-          return { ok: false, error: '这个 JSON 里没有识别到书源' };
-        }
+        r = await NB.callA('dialog.open', { mimes: ['application/zip', 'application/json', '*/*'], multiple: false, title: '选择备份文件（zip / json 都行）' });
+      } catch (e) { return { ok: false, error: '打开文件失败：' + (e.message || e) }; }
+      if (r && r.error) return { ok: false, error: r.error };
+      if (!r || !r.items || !r.items.length) return { ok: false, canceled: !!(r && r.canceled) };
+      const picked = r.items[0];
+      if (picked.error) return { ok: false, error: '读取文件失败：' + picked.error };
+      const name = picked.name || '备份文件';
+      try {
+        const inner = stage(picked.path);
         const buf = await readStagedBufferAsync(inner);
+        const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf || []);
+        const isZip = u8.length > 4 && u8[0] === 0x50 && u8[1] === 0x4b;   // PK
+        /* 不看扩展名：手机导出的备份可能叫 .bak、.txt 甚至没有后缀。
+           非 zip 一律按 JSON 备份解析，书架 + 书源 + 书签一起识别。 */
+        if (!isZip) {
+          const text = new TextDecoder('utf-8').decode(u8).replace(/^\uFEFF/, '');
+          const j = legado.parseBackupJson(text);
+          if (!j.ok) return { ok: false, error: j.error };
+          lastZipInfo = { kind: j.kind, name };
+          return {
+            ok: true, kind: j.kind, name, summary: j.summary,
+            sources: j.sources || null, legado: j.legado || null,
+          };
+        }
         const parsed = legado.parseBackupZip(buf);
         if (!parsed.ok) return { ok: false, error: parsed.error };
+        if (parsed.kind === 'sources') {
+          lastZipInfo = { kind: 'sources', name };
+          return { ok: true, kind: 'sources', name, sources: parsed.sources, summary: parsed.summary };
+        }
         pendingZip = { buffer: buf, parsed };
         lastZipInfo = { kind: parsed.kind, name };
         return { ok: true, kind: parsed.kind, name, summary: parsed.summary, legado: parsed.legado || null };

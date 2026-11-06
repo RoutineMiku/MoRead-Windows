@@ -121,8 +121,17 @@ function pickStr(o, ...keys) {
 }
 
 /** 把 Legado 的 bookSource 数组收敛成可交给渲染层归一化的裸对象 */
+/* 原版「阅读」的书源有多种包裹形态：
+   裸数组 / {bookSource:[...]} / {bookSources:[...]} / {sources:[...]} / {data:[...]}。
+   以前只认前两种，手机里导出的「bookSource」单键 JSON 会被判成 0 个书源。 */
 function rawSourcesFromLegado(arr) {
-  const list = Array.isArray(arr) ? arr : (arr && arr.bookSources) || [];
+  let list = [];
+  if (Array.isArray(arr)) list = arr;
+  else if (arr && typeof arr === 'object') {
+    for (const k of ['bookSource', 'bookSources', 'sources', 'data', 'bookSourceList']) {
+      if (Array.isArray(arr[k])) { list = arr[k]; break; }
+    }
+  }
   return list.filter(x => x && (x.bookSourceName || x.name));
 }
 
@@ -136,14 +145,17 @@ function rawBooksFromLegado(arr) {
   const list = Array.isArray(arr) ? arr : (arr && arr.books) || [];
   const out = [], skipped = [];
   for (const b of list) {
-    if (!b || (!b.name && !b.bookUrl)) continue;
+    if (!b || (!b.name && !b.bookName && !b.bookUrl)) continue;
     const url = String(b.bookUrl || '');
     // 原版本地书带的是手机路径（/storage/... 或 content://），桌面端无法还原
     const isLocal = /^file:\/\//.test(url) || /^content:\/\//.test(url)
       || /^\/storage\//.test(url) || b.origin === 'local' || b.localBook === true;
-    if (isLocal) { skipped.push(b.name || b.bookUrl); continue; }
+    if (isLocal) { skipped.push(b.name || b.bookName || b.bookUrl); continue; }
+    /* 原版字段是 name；有些第三方导出的备份写 bookName，两种都认 */
+    const name = String(pickStr(b, 'name', 'bookName') || '').trim();
+    if (!name) { skipped.push(url || '（无书名）'); continue; }
     out.push({
-      name: pickStr(b, 'name'),
+      name,
       author: pickStr(b, 'author') || '佚名',
       bookUrl: pickStr(b, 'bookUrl'),
       origin: normalizeUrl(pickStr(b, 'origin')),
@@ -250,7 +262,13 @@ function buildBackupZip(state, opts = {}) {
 function parseBackupZip(buf) {
   let zip;
   try { zip = readZip(buf); } catch (e) {
-    return { ok: false, error: '不是有效的 zip 文件：' + e.message };
+    // 不是 zip 就再当单 JSON 备份试一次，别直接甩「不是有效的 zip」
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf || []);
+    const head = new TextDecoder('utf-8').decode(u8.slice(0, 64)).replace(/^\uFEFF/, '').trimStart();
+    if (head.startsWith('{') || head.startsWith('[')) {
+      return parseBackupJson(new TextDecoder('utf-8').decode(u8));
+    }
+    return { ok: false, error: '不是有效的 zip 或 JSON 备份：' + e.message };
   }
   const names = zip.names;
   const has = n => names.includes(n);
@@ -273,21 +291,31 @@ function parseBackupZip(buf) {
     } catch (e) { /* 落到 Legado 分支 */ }
   }
 
-  // 2) Legado 备份
-  const readArr = n => {
+  // 2) Legado 备份。zip 里每个 json 也可能是 {bookSource:[...]} 这种包裹，统一取数组。
+  const readArr = (n, keys) => {
     if (!has(n)) return [];
-    try { return JSON.parse(zip.readText(n)) || []; } catch (e) { return []; }
+    let v;
+    try { v = JSON.parse(zip.readText(n)); } catch (e) { return []; }
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === 'object') return keys ? pickArrayField(v, keys) : [];
+    return [];
   };
-  const sources = rawSourcesFromLegado(readArr('bookSource.json'));
-  const books = rawBooksFromLegado(readArr('bookshelf.json'));
-  const bookmarks = rawBookmarksFromLegado(readArr('bookmark.json'));
-  const records = rawReadRecordsFromLegado(readArr('readRecord.json'));
+  const sources = rawSourcesFromLegado(readArr('bookSource.json', ['bookSource', 'bookSources', 'sources']));
+  const books = rawBooksFromLegado(readArr('bookshelf.json', ['bookshelf', 'books']));
+  const bookmarks = rawBookmarksFromLegado(readArr('bookmark.json', ['bookmark', 'bookmarks']));
+  const records = rawReadRecordsFromLegado(readArr('readRecord.json', ['readRecord', 'readRecords']));
 
   // 书架分组：把 groupId 换成组名交给渲染层建组
-  const gmap = rawGroupsFromLegado(readArr('bookGroup.json'));
+  const gmap = rawGroupsFromLegado(readArr('bookGroup.json', ['bookGroup', 'groups']));
   for (const b of books.books) b.groupName = gmap.get(b.group) || '';
 
+  // 有些备份把全部数据塞在一个总 JSON 里（backup.json / 备份.json …），逐个试一遍
   if (!sources.length && !books.books.length && !bookmarks.length) {
+    for (const n of names) {
+      if (!/\.json$/i.test(n)) continue;
+      const one = parseBackupJson(zip.readText(n));
+      if (one.ok && one.kind === 'legado') return one;
+    }
     return { ok: false, error: 'zip 里没有找到书源或书架数据（需要 bookSource.json 或 bookshelf.json）' };
   }
   return {
@@ -314,7 +342,7 @@ function readZipFiles(buf, fileMap) {
   return out;
 }
 
-/** 单个书源 JSON 文件（兼容数组 / {bookSources:[...]}） */
+/** 单个书源 JSON 文件（兼容数组 / {bookSource:[...]} 等各种包裹） */
 function parseSourceFile(text) {
   let json;
   try { json = JSON.parse(text); } catch (e) { return { ok: false, error: 'JSON 解析失败：' + e.message }; }
@@ -322,8 +350,56 @@ function parseSourceFile(text) {
   return { ok: true, sources: list };
 }
 
+/* 从备份 JSON 对象里取一个数组字段；有些导出会再套一层 {data:[...]} */
+function pickArrayField(json, keys) {
+  for (const k of keys) {
+    const v = json[k];
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === 'object' && Array.isArray(v.data)) return v.data;
+  }
+  return [];
+}
+
+/**
+ * 解析「单个 JSON 文件」形式的备份。
+ * 手机里除了 zip，还常见把 bookSource / bookshelf / bookmark 打在一个 JSON 里导出，
+ * 甚至直接是纯书源数组。以前 pickZip 只按 parseSourceFile 取书源，书架和书签全被丢掉，
+ * 而且 bookSource 单键还取不到 → 表现为「点了没反应」。
+ * 返回结构与 parseBackupZip 对齐，恢复界面可以直接复用。
+ */
+function parseBackupJson(text) {
+  let json;
+  try { json = JSON.parse(String(text).replace(/^\uFEFF/, '').trim()); }
+  catch (e) { return { ok: false, error: 'JSON 解析失败：' + e.message }; }
+
+  const isArray = Array.isArray(json);
+  const sources = rawSourcesFromLegado(json);
+  const books = isArray ? { books: [], skipped: [] }
+    : rawBooksFromLegado(pickArrayField(json, ['bookshelf', 'books', 'bookShelf']));
+  const bookmarks = isArray ? []
+    : rawBookmarksFromLegado(pickArrayField(json, ['bookmark', 'bookmarks']));
+  const records = isArray ? []
+    : rawReadRecordsFromLegado(pickArrayField(json, ['readRecord', 'readRecords']));
+
+  if (!sources.length && !books.books.length && !bookmarks.length) {
+    return { ok: false, error: '这个 JSON 里没有识别到书源或书架数据（需要 bookSource / bookshelf 数组）' };
+  }
+  if (!books.books.length && !bookmarks.length) {
+    return { ok: true, kind: 'sources', sources,
+      summary: { sources: sources.length, books: 0, bookmarks: 0 } };
+  }
+  return {
+    ok: true, kind: 'legado',
+    legado: { sources, books: books.books, bookmarks, records },
+    summary: {
+      books: books.books.length, sources: sources.length, bookmarks: bookmarks.length,
+      skippedLocal: books.skipped.length, withFiles: false
+    }
+  };
+}
+
 module.exports = {
   toLegadoSources, toLegadoBooks, toLegadoBookmarks, toLegadoReadRecords,
-  buildBackupZip, parseBackupZip, readZipFiles, parseSourceFile,
+  buildBackupZip, parseBackupZip, readZipFiles, parseSourceFile, parseBackupJson,
   normalizeUrl
 };
