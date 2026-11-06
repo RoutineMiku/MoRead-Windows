@@ -8,7 +8,7 @@
 
 **下载**（都在本仓库 [Releases](https://github.com/RoutineMiku/MoRead-Windows/releases)）：
 - Windows：`MoRead-win32-x64.zip`，解压后双击 `墨读.exe` 即可，免安装、不写注册表、数据跟着程序走
-- 安卓：[`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.4.5-android/MoRead-android.apk)（v0.4.5），直接安装（WebView 内置 Node 兼容层，桌面/安卓共用同一套阅读与书源逻辑）
+- 安卓：[`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.4.6-android/MoRead-android.apk)（v0.4.6），直接安装（WebView 内置 Node 兼容层，桌面/安卓共用同一套阅读与书源逻辑）
 - 网页版（iOS / iPad / 任意浏览器）：**<https://routinemiku.github.io/MoRead-Windows/>** — 免安装、免账号，iPhone 上用 Safari 打开后「分享 → 添加到主屏幕」，就得到全屏独立图标
 
 ![书架](docs/screenshots/shot_shelf.png)
@@ -43,7 +43,8 @@ export default {
 
 部署后把地址（形如 `https://xxx.workers.dev/?url=`）填进「设置 → 书源代理地址」即可。留空 = 纯本地模式。
 
-**注意**：网页版数据存在浏览器里，清理「网站数据」/ 无痕模式会连同书架一起清掉；重要书籍建议用设置里的「导出备份 zip」留一份。
+**注意**：网页版数据默认存在浏览器里，清理「网站数据」/ 无痕模式会连同书架一起清掉；重要书籍建议用设置里的「导出备份 zip」留一份。
+如果想让书架存在**自己的一台机器**上、家里所有设备共用同一份，见下面的「自托管」。
 
 ### 换手机 / 换电脑怎么搬
 
@@ -56,6 +57,25 @@ export default {
 <img src="docs/screenshots/web/web_phone_shelf.png" width="300" alt="网页版手机书架" /> <img src="docs/screenshots/web/web_desktop_shelf.png" width="520" alt="网页版桌面书架" />
 
 本地开发：`npm run web`（生成 `dist-web/`）→ `npm run web:serve`（<http://127.0.0.1:8099/> 预览）→ `GH_TOKEN=... npm run web:deploy`（发布到 GitHub Pages）。
+
+### 自托管：家里一台机器，全屋共用一份书架
+
+`server/gateway.js` 是一个零依赖的单文件服务（Node >= 18，只用内置模块），同时做三件事：
+托管 `dist-web`、给在线书源做同源抓页代理 `/fetch`、把书架/书源/进度**存到服务器磁盘** `/api/fs`。
+
+```bash
+node build/gen-web.js
+DATA_DIR=./data STATIC_DIR=./dist-web PORT=8080 node server/gateway.js
+# 浏览器打开 http://<机器IP>:8080/
+```
+
+前端会自动探测 `/api/fs/ping`：探测到就进「设备存储」模式（换设备、清缓存、无痕模式都不丢，
+两台设备并发写会提示冲突而不是静默覆盖）；探测不到就仍是原来的浏览器本地存储，
+**同一份 `dist-web` 放到 GitHub Pages 也照常用**。网关还会自动注入书源代理地址，
+手机第一次打开就能搜书，不用手工填代理。
+
+完整说明（`/api/fs` 协议、缓存指纹、SSRF / fake-ip 开关、systemd 示例、安全边界）
+见 [docs/self-hosting.md](docs/self-hosting.md)。
 
 ## 运行 · Windows
 
@@ -146,7 +166,9 @@ export default {
   - `moread.json`（墨读完整存档，无损还原）
   - `bookSource.json` / `bookshelf.json` / `bookmark.json` / `readRecord.json` / `bookGroup.json`（Legado 字段，原版「阅读」可直接导入这个 zip）
   - 可选 `files/` 里的本地书原文件
-- **导入**：墨读 zip、原版「阅读」备份 zip、单个书源 JSON 都能识别；支持「合并 / 覆盖」
+- **导入**：按**文件内容**识别，不看扩展名；支持「合并 / 覆盖」
+  - 墨读备份 zip、原版「阅读」备份 zip、zip 里只有一个总 JSON、单个 JSON 整包（含 `bookSource` + `bookshelf`）、纯书源 JSON（裸数组或 `bookSource` / `bookSources` / `sources` / `data` 包裹），以及上述任意格式改叫 `.bak` / `.txt` / 无后缀
+  - 书源按规范化 url 去重，重复导入会提示「新增 0，更新 N」；几千个书源也用索引查找，不会卡住
   - 原版备份里的手机本地书（`file:///storage/...`）无法跨设备还原，会自动跳过并提示数量
 - **坚果云（WebDAV）**：
   - 服务器、账号、应用密码、远程目录（自动创建）
@@ -181,6 +203,9 @@ ui/engine.js     书源规则引擎 + 任意网页自动识别（目录/正文/�
 ui/detect.js     书源自动检测分级（优质/有效/较差/无用）
 ui/app.js        界面逻辑（书架/书源/网页/阅读器/设置）
 ui/style.css     样式（含阅读器四套主题）
+web/bridge-web.js 网页版原生桥：IndexedDB 虚拟 FS、设备存储 /api/fs、抓页代理、文件选择
+server/gateway.js 自托管网关：静态站点 + /fetch 抓页代理 + /api/fs 设备端存档（零依赖）
+docs/self-hosting.md 自托管部署说明
 build/gen_icon.py 纯 Python 生成图标
 build/pack.js     打包：组装运行时 + 应用代码（先建英文目录再改中文名，避免编码问题）
 build/finish.js   打包收尾（裁剪语言包、写便携标记与说明、压缩 zip）

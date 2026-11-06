@@ -56,19 +56,126 @@
   }
   async function flushDirty() {
     if (saveT) { clearTimeout(saveT); saveT = null; }
-    if (!dirty.size || !window.indexedDB) return;
-    try {
-      const db = await idbOpen();
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction('files', 'readwrite');
-        const st = tx.objectStore('files');
-        for (const p of dirty) st.put(FS.get(p) || null, p);   // null = 已删除
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error);
-      });
-      dirty.clear();
-    } catch (e) { /* 存储失败不致命：内存里还有 */ }
+    if (!dirty.size) return;
+    const paths = Array.from(dirty);
+    dirty.clear();
+    if (window.indexedDB) {
+      try {
+        const db = await idbOpen();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('files', 'readwrite');
+          const st = tx.objectStore('files');
+          for (const p of paths) st.put(FS.get(p) || null, p);   // null = 已删除
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+        });
+      } catch (e) { /* 本地缓存写失败不致命：内存里还有 */ }
+    }
+    /* 自建网关托管时，再把持久数据推到设备上 */
+    if (remote) remotePush(paths).catch(() => { /* 网络断了就先留本地，下次改动再推 */ });
   }
+
+  /* ================================================================
+   * 0b. 设备端存储
+   *   同源有 /api/fs（自建网关）时，存档写到这台机器上而不是只写浏览器：
+   *   换设备 / 换浏览器 / 清缓存都不会丢，家里几台设备读的是同一份书架。
+   *   只同步「持久数据」——data.json 与 books/covers/files/，
+   *   章节缓存（cache/）与临时文件（tmp/）留在浏览器本地，不占设备空间。
+   * ================================================================ */
+  const REMOTE = '/api/fs';
+  const isDurable = p => p === '/moread/data.json' || /^\/moread\/(books|covers|files)\//.test(String(p));
+  let remote = false;
+  let remoteRoot = '';              // 设备上真实的存档目录，仅用于界面展示
+  const verCache = new Map();       // path -> 服务端版本号
+  let conflictAt = 0;
+
+  async function remoteProbe() {
+    try {
+      const r = await fetch(REMOTE + '/ping', { cache: 'no-store' });
+      if (!r.ok) return false;
+      const j = await r.json();
+      if (j && j.ok === true && j.mode === 'device') { remoteRoot = String(j.root || ''); return true; }
+      return false;
+    } catch (e) { return false; }
+  }
+
+  async function remoteGet(path) {
+    try {
+      const r = await fetch(REMOTE + '?path=' + encodeURIComponent(path), { cache: 'no-store' });
+      if (!r.ok) return null;
+      const buf = new Uint8Array(await r.arrayBuffer());
+      const ver = r.headers.get('X-Fs-Version') || '';
+      if (ver) verCache.set(path, ver);
+      return buf;
+    } catch (e) { return null; }
+  }
+
+  /** 启动时把设备上的文件拉进来；onlyState=true 只拉 data.json（先把书架显示出来） */
+  async function remotePull(onlyState) {
+    let files = [];
+    try {
+      const r = await fetch(REMOTE + '/list', { cache: 'no-store' });
+      const j = await r.json();
+      files = (j && j.files) || [];
+    } catch (e) { return 0; }
+    if (onlyState) files = files.filter(f => f.path === '/moread/data.json').slice(0, 1);
+    else files = files.filter(f => f.path !== '/moread/data.json');
+    let n = 0;
+    for (const f of files) {
+      const buf = await remoteGet(f.path);
+      if (!buf) continue;
+      FS.set(f.path, buf);
+      ensureDir(dirname(f.path));
+      if (!f.version) verCache.set(f.path, '');
+      n++;
+    }
+    return n;
+  }
+
+  async function remotePush(paths) {
+    for (const p of paths) {
+      if (!isDurable(p)) continue;
+      const data = FS.get(p);
+      const ver = verCache.get(p) || '';
+      const q = REMOTE + '?path=' + encodeURIComponent(p) + (ver ? '&if=' + encodeURIComponent(ver) : '');
+      try {
+        if (data == null) {
+          const r = await fetch(q, { method: 'DELETE' });
+          if (r.ok) verCache.delete(p);
+          continue;
+        }
+        const r = await fetch(q, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: data
+        });
+        if (r.status === 409) {
+          /* 别的设备刚写过这份数据：宁可停下来说清楚，也不静默把人家覆盖掉 */
+          const j = await r.json().catch(() => ({}));
+          if (j && j.version) verCache.set(p, j.version);
+          remoteConflict();
+          return;
+        }
+        if (r.ok) {
+          const j = await r.json().catch(() => ({}));
+          if (j && j.version) verCache.set(p, j.version);
+        }
+      } catch (e) { /* 断网：留在本地缓存，下次改动再推 */ }
+    }
+  }
+
+  function remoteConflict() {
+    const now = Date.now();
+    if (now - conflictAt < 8000) return;
+    conflictAt = now;
+    toast('另一台设备刚更新了书架，正在同步最新数据…');
+    /* 直接用服务端版本覆盖内存态再刷新，避免两边数据混着写 */
+    remotePull(true).then(() => {
+      DIRS.add('/moread');
+      setTimeout(() => { try { location.reload(); } catch (e) { } }, 1200);
+    }).catch(() => { });
+  }
+
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushDirty(); });
   window.addEventListener('beforeunload', () => flushDirty());
 
@@ -109,9 +216,22 @@
   /* ================================================================
    * 2. 书源代理（用户自填，默认空 = 不发任何网络请求）
    *    约定：<代理地址>?url=<encodeURIComponent(原始地址)>
+   *    自建网关托管时会注入 <meta name="moread-proxy" content="/fetch?format=text">，
+   *    此时默认就用同源 /fetch，手机第一次打开即可搜书，不必手工填地址。
    * ================================================================ */
   const PROXY_KEY = 'moread.proxy';
-  function getProxy() { try { return (localStorage.getItem(PROXY_KEY) || '').trim(); } catch (e) { return ''; } }
+  function metaProxy() {
+    try {
+      const m = document.querySelector('meta[name="moread-proxy"]');
+      return m && m.content ? new URL(m.content, location.href).href : '';
+    } catch (e) { return ''; }
+  }
+  function getProxy() {
+    try {
+      const v = (localStorage.getItem(PROXY_KEY) || '').trim();
+      return v || metaProxy();
+    } catch (e) { return metaProxy(); }
+  }
   function proxied(url) {
     const p = getProxy();
     if (!p) return url;
@@ -236,27 +356,67 @@
     return items;
   }
 
+  /* 文件选择器：常驻一个真实 input（手机浏览器对临时创建 + 立即 click 很敏感）。
+   * 判定取消只靠 cancel 事件和很长时间没动静的兜底，绝不用 window.focus——
+   * 系统文件框关掉时窗口回焦常常早于 change 事件，旧写法会把「已经选好文件」
+   * 抢先收口成空数组，上层又把这个结果当成静默取消，用户就看到「点了没反应」。 */
+  let fileInput = null, pickSeq = 0;
+  function getFileInput() {
+    if (fileInput && fileInput.isConnected) return fileInput;
+    fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.setAttribute('aria-hidden', 'true');
+    fileInput.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
+    (document.body || document.documentElement).appendChild(fileInput);
+    return fileInput;
+  }
   function pickFiles(mimes, multiple) {
     return new Promise(resolve => {
-      const inp = document.createElement('input');
-      inp.type = 'file';
-      if (mimes && mimes.length) inp.accept = mimes.join(',');
-      inp.multiple = !!multiple;
-      inp.style.display = 'none';
-      let done = false;
-      const finish = async list => {
+      const inp = getFileInput();
+      const seq = ++pickSeq;
+      let done = false, timer = 0;
+      function cleanup() {
+        clearTimeout(timer);
+        inp.removeEventListener('change', onChange);
+        inp.removeEventListener('cancel', onCancel);
+        try { inp.value = ''; } catch (e) { /* 某些内核不允许清空 */ }
+      }
+      async function finish(list) {
         if (done) return;
-        done = true;
-        document.body.removeChild(inp);
-        resolve(await stageFiles(list));
-      };
-      inp.onchange = () => finish(Array.from(inp.files || []));
-      // 用户取消：input 不触发 change，用焦点回来 + 超时兜底收口
-      document.body.appendChild(inp);
-      inp.click();
-      setTimeout(() => { const w = () => finish([]); window.addEventListener('focus', w, { once: true }); setTimeout(w, 60 * 1000); }, 800);
+        // 用户又点了一次按钮：把上一次收口，顺手摘掉它的事件监听
+        if (seq !== pickSeq) { done = true; cleanup(); resolve([]); return; }
+        done = true; cleanup();
+        try { resolve(await stageFiles(list)); }
+        catch (e) { resolve([{ name: '', path: '', size: 0, error: '读取失败：' + (e.message || e) }]); }
+      }
+      function onChange() { finish(Array.from(inp.files || [])); }
+      function onCancel() { finish([]); }
+      try {
+        inp.value = '';
+        inp.accept = (mimes && mimes.length) ? mimes.join(',') : '';
+        inp.multiple = !!multiple;
+      } catch (e) { /* 忽略个别内核对 value 的限制 */ }
+      inp.addEventListener('change', onChange);
+      inp.addEventListener('cancel', onCancel);
+      timer = setTimeout(() => finish([]), 5 * 60 * 1000);
+      try { inp.click(); }
+      catch (e) {
+        finish([{ name: '', path: '', size: 0, error: '浏览器没有打开文件选择器：' + (e.message || e) }]);
+      }
     });
   }
+
+  /* 网页版专用：在按钮点击的同步调用栈里就把文件框打开。
+     部分手机浏览器只在「真实用户手势」里允许 input.click()，中间只要隔一层
+     await 就会静默拒绝；这里先开好，后面 dialog.open 直接复用这一次的结果。
+     桌面 / 安卓没有这个全局函数，仍走原来的 dialog.open 路径。 */
+  let primedPick = null;
+  window.__moreadPrimeFilePicker = function (mimes, multiple) {
+    // 结果保留到 dialog.open 来取（文件可能比桥接调用更早选完）；
+    // 再次点击会直接覆盖，pickFiles 内部也会让上一次自动收口。
+    const p = pickFiles(mimes || [], !!multiple);
+    primedPick = { promise: p, at: Date.now() };
+  };
 
   /* ================================================================
    * 6. zlib（pako 同步实现，epub / 备份 zip 解压用）
@@ -402,7 +562,10 @@
         app: 'moread', platform: 'web', version: '0.4.1', code: 41, sdk: 0,
         device: (navigator.userAgent || '').slice(0, 80),
         paths: { root: '/moread', cache: '/cache', external: '' },
-        webview: (navigator.userAgent || '').split(') ')[0] + ')'
+        webview: (navigator.userAgent || '').split(') ')[0] + ')',
+        /* 存档位置：device = 家里这台服务器；browser = 只有本浏览器 IndexedDB */
+        dataStore: remote ? 'device' : 'browser',
+        dataRoot: remote ? remoteRoot : ''
       };
       case 'env.layout': {
         const w = window.innerWidth, h = window.innerHeight;
@@ -469,8 +632,13 @@
     switch (name) {
       case 'http.request': return await httpRequest(a);
       case 'dialog.open': {
-        const items = await pickFiles(a.mimes || [], a.multiple);
-        return { ok: true, items };
+        const primed = primedPick;
+        primedPick = null;
+        // 只有「恢复备份」这次预先打开的选择框能被复用，别的入口（导入书源等）
+        // 绝不能误拿这个文件
+        const fresh = primed && /备份/.test(a.title || '') && (Date.now() - primed.at) < 10 * 60 * 1000;
+        const items = fresh ? await primed.promise : await pickFiles(a.mimes || [], a.multiple);
+        return { ok: true, items, canceled: !items.length };
       }
       case 'dialog.save': {
         const name2 = a.name || 'export.bin';
@@ -546,6 +714,22 @@
   } catch (e) { }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => { });
 
-  /* 虚拟 FS 就绪后放行页面初始化（index.html 依赖 __bridgeReady） */
-  window.__bridgeReady = fsLoadAll().then(() => { DIRS.add('/moread'); DIRS.add('/moread/tmp'); });
+  /* 虚拟 FS 就绪后放行页面初始化（index.html 依赖 __bridgeReady）
+     顺序：先读本地 IndexedDB 缓存（快），再问网关有没有设备端存档——
+     有就用设备上的覆盖本地（data.json 必须先到位，页面才能渲染出正确书架），
+     其余本地书文件在后台慢慢拉，不挡启动。 */
+  window.__bridgeReady = fsLoadAll()
+    .then(() => remoteProbe())
+    .then(async ok => {
+      remote = !!ok;
+      if (remote) {
+        await remotePull(true);
+        remotePull(false).catch(() => { });
+      }
+      DIRS.add('/moread'); DIRS.add('/moread/tmp');
+      if (remote) {
+        try { document.documentElement.setAttribute('data-moread-store', 'device'); } catch (e) { }
+      }
+    })
+    .catch(() => { DIRS.add('/moread'); DIRS.add('/moread/tmp'); });
 })();
