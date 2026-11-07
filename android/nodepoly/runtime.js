@@ -803,6 +803,23 @@
     /* ---- 网络（直接复用桌面 net.js） ---- */
     net: async opts => {
       try {
+        /* binary：漫画取图，返回 base64；不做字符解码，避免把二进制当文本弄坏 */
+        if (opts && opts.binary) {
+          const r = await netMod.request(opts.url, {
+            headers: opts.headers,
+            timeout: opts.timeout || 20000,
+            maxBytes: opts.maxBytes || 8 * 1024 * 1024
+          });
+          if (r.status >= 400) return { ok: false, status: r.status, error: 'HTTP ' + r.status };
+          const buf = r.buffer;
+          const ct = String((r.headers && r.headers['content-type']) || '').split(';')[0].trim().toLowerCase();
+          return {
+            ok: true, status: r.status, url: r.url,
+            mime: /^image\//.test(ct) ? ct : 'application/octet-stream',
+            b64: buf.toString('base64'),
+            bytes: buf.length
+          };
+        }
         const r = await netMod.fetchText(opts.url, {
           charset: opts.charset,
           method: opts.method || 'GET',

@@ -334,6 +334,16 @@ function registerIpc() {
 
   ipcMain.handle('net:fetch', async (_e, opts) => {
     try {
+      /* binary：漫画章节取图，回 base64 让前端拼成 data URL */
+      if (opts && opts.binary) {
+        const b = await net.fetchBinary(opts.url, {
+          headers: opts.headers,
+          timeout: opts.timeout || 20000,
+          maxBytes: opts.maxBytes
+        });
+        if (b.status >= 400) return { ok: false, status: b.status, error: 'HTTP ' + b.status };
+        return { ok: true, status: b.status, url: b.url, mime: b.mime, b64: b.b64, bytes: b.bytes, ms: b.ms };
+      }
       const r = await net.fetchText(opts.url, {
         charset: opts.charset,
         method: opts.method || 'GET',
