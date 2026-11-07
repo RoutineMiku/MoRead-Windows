@@ -311,7 +311,7 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 
 /* position:relative：让章节段的 offsetTop 直接等于滚动内容坐标（连续阅读按它判定章节归属） */
 .reader-stage{flex:1;overflow-y:auto;overflow-x:hidden;background:var(--r-bg);color:var(--r-text);position:relative;}
-.page{max-width:730px;margin:0 auto;padding:48px 40px 110px;user-select:text;}
+.page{max-width:730px;margin:0 auto;padding:44px 40px 44px;user-select:text;}
 .reader.mode-paged .reader-stage{overflow:hidden;}
 /* 翻页模式：正文按「书页」铺满阅读区。
    左右标点边距 = max(26px, (可用宽 - 一行上限)/2)，--page-max 由 applyReaderStyle 按字号算出
@@ -320,7 +320,7 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 .reader.mode-paged .page{
   max-width:none;width:100%;height:100%;overflow:hidden;
   display:flex;flex-direction:column;
-  padding-block:30px 38px;
+  padding-block:20px 26px;
   padding-inline:max(26px, calc((100% - var(--page-max, 1100px)) / 2));
 }
 /* 正文区撑满页内剩余高度，段落按 space-between 竖向摊开：
@@ -442,6 +442,33 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:#9dbcf5;background:#fff;box-shadow:0 0 0 3px rgba(43,108,224,.12);}
 .field input.mono,.field textarea.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px;user-select:text;}
 .modal-actions{display:flex;gap:9px;justify-content:flex-end;margin-top:18px;}
+/* 阅读器「Aa」排版面板：一行一个参数，左边名称、中间滑杆、右边当前值 */
+.ts-grid{display:flex;flex-direction:column;gap:12px;margin:2px 0 4px;}
+.ts-row{display:flex;align-items:center;gap:12px;}
+.ts-row .ts-k{flex:0 0 34px;font-size:13px;color:var(--muted);}
+.ts-row input[type=range]{flex:1;min-width:0;accent-color:var(--accent);height:22px;}
+.ts-row .ts-v{flex:0 0 58px;text-align:right;font-size:12px;color:var(--faint);
+  font-variant-numeric:tabular-nums;white-space:nowrap;}
+.ts-row .seg,.ts-row .swatches{flex:1;}
+.ts-row .swatches{justify-content:flex-start;}
+/* 关于我们 */
+.about{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:6px 0 2px;}
+.about-logo{width:84px;height:84px;border-radius:20px;box-shadow:0 10px 24px -12px rgba(20,30,50,.5);}
+.about-name{font-family:var(--serif);font-size:22px;font-weight:600;letter-spacing:4px;margin-top:6px;}
+.about-ver{font-size:12px;color:var(--faint);letter-spacing:.5px;}
+.about-desc{margin:10px 0 4px;font-size:12.5px;line-height:1.75;color:var(--muted);}
+.about-link{display:inline-flex;align-items:center;gap:7px;margin-top:6px;padding:8px 14px;border-radius:999px;
+  background:#f3f6fb;border:1px solid #e4ebf6;color:#2a4c86;font-size:12.5px;text-decoration:none;}
+.about-link:hover{background:#eaf1fb;}
+.about-link svg{width:15px;height:15px;fill:currentColor;}
+.about-qr{display:flex;align-items:center;gap:14px;margin-top:16px;padding:12px 14px;border-radius:12px;
+  background:#fafbfd;border:1px solid var(--line);text-align:left;}
+.about-qr img{width:112px;height:112px;border-radius:8px;background:#fff;}
+.about-qr span{font-size:12.5px;color:var(--text);line-height:1.7;}
+.about-qr small{color:var(--faint);font-size:11.5px;}
+.about-by{margin-top:14px;font-size:11.5px;color:var(--faint);letter-spacing:.6px;}
+.about-by b{color:var(--muted);font-weight:600;}
+html[data-theme="night"] .about-link{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1);color:#9fc0f5;}
 .modal-actions .left{margin-right:auto;}
 
 /* ---------------- toast / drop ---------------- */
@@ -833,8 +860,9 @@ html[data-layout] #reader.bars-off .reader-bot{
 }
 /* 沉浸时正文自己让开状态栏和手势条（分页排版读的是 computed padding，会自动重排） */
 html[data-layout] #reader.bars-off .page{
-  padding-top:max(34px, var(--sa-top));
-  padding-bottom:max(96px, calc(var(--sa-bottom) + 72px));
+  padding-top:max(30px, var(--sa-top));
+  /* 底栏此时是隐藏的，以前还按「底栏高度 + 72px」让位，等于白扔三行正文 */
+  padding-bottom:max(18px, calc(var(--sa-bottom) + 10px));
 }
 
 /* 滚动模式整章一口气渲染：让浏览器跳过屏外段落的排版与绘制，长章滑动不卡。
@@ -843,7 +871,7 @@ html[data-layout] #reader.bars-off .page{
 /* EPUB 内嵌图：与正文段落同样只有下外边距（分页器按「高度+下边距」相加），
    限高由 JS 按阅读区高度算好写在行内，保证空页一定放得下单张图。 */
 .page .body .r-img{display:block;max-width:100%;margin:0 auto var(--para-gap,1em);}
-html[data-layout="portrait"] .page{padding:26px 18px 96px;max-width:100%;}
+html[data-layout="portrait"] .page{padding:22px 18px 28px;max-width:100%;}
 html[data-layout="portrait"] .page h2{font-size:22px;margin:8px 0 24px;}
 html[data-layout="portrait"] .rb-row{gap:7px;}
 /* 竖屏第二排按钮本来就多（字号/模式/字体/四套主题/朗读/设置），
@@ -856,9 +884,9 @@ html[data-layout="portrait"] .rb-row2 .swatches{flex:0 0 auto;}
 html[data-layout="portrait"] .rb-row2 .rb-spacer{flex:1 1 0;min-width:0;}
 html[data-layout="portrait"] .rb-btn{height:36px;flex:0 0 auto;white-space:nowrap;}
 html[data-layout="portrait"] .toc{width:84%;top:calc(54px + var(--sa-top));box-shadow:20px 0 40px -22px rgba(0,0,0,.6);}
-html[data-layout="landscape"] .page{padding:34px 46px 100px;}
+html[data-layout="landscape"] .page{padding:32px 46px 34px;}
 html[data-layout="landscape"] .toc{width:320px;}
-html[data-layout="wide"] .page{padding:44px 40px 110px;max-width:820px;}
+html[data-layout="wide"] .page{padding:44px 40px 44px;max-width:820px;}
 
 /* 书源/搜索工具条按钮较多时横向滚动，避免挤成一团 */
 html[data-layout] .tb-group,
