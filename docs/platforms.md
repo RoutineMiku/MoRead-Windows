@@ -25,7 +25,7 @@
 | HarmonyOS 4.x 及以下 | 直接装 Android APK | ✅ 系统兼容 | — |
 | HarmonyOS NEXT (5.0) | `MoRead-harmony-*.hap` | ✅ **能编出 hap**（OpenHarmony SDK + hvigor，未在真机验证） | `npm run harmony:pack` |
 | iOS / iPadOS | PWA | ✅ 现在就能用 | — |
-| iOS 原生 | `ios/` Xcode 工程 + `build-ipa.sh` | ✅ **工程可编译**（需 Mac 出 ipa） | 见 `ios/README.md` |
+| iOS 原生 | `MoRead-*-unsigned.ipa` | ✅ **已出包**（GitHub Actions 的 macOS runner），未真机验证 | Actions → `ios-ipa.yml` |
 
 ## 桌面三端（Electron）
 
