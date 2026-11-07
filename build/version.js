@@ -93,30 +93,40 @@ if (oldWeb !== next) {
 }
 
 /* 4. README 下载区：只把「这次真的出了包」的行指到新标签，
-   没出的平台（比如本期没打 Linux/macOS）保留旧版本链接 —— 否则就是一条 404。 */
+   没出的平台（比如本期没打 Linux/macOS）保留旧版本链接 —— 否则就是一条 404。
+   开头那段说明也一起生成：全出齐就说「全平台产物都在」，有平台缺就点名是哪几个。 */
+const REPO_URL = 'https://github.com/RoutineMiku/MoRead-Windows';
 let readme = read(README);
 const before = readme;
-readme = readme.replace(/(\*\*下载\*\*[^\n]*\n)([\s\S]*?)(\n各平台怎么打)/, (m, head, body, tail) => {
-  const newHead = head
-    .replace(/releases\/tag\/v[\d.]+/, `releases/tag/v${next}`)
-    .replace(/(Releases · v)[\d.]+/, `$1${next}`);
+readme = readme.replace(/(\*\*下载\*\*[\s\S]*?\n)(\|[\s\S]*?)(\n各平台怎么打)/, (m, _head, body, tail) => {
+  const stale = [];
   const rows = body.split('\n').map(line => {
-    /* 两种命名：MoRead-<平台>-<版本>[-signed].<ext> 与 MoRead-<版本>-unsigned.ipa */
+    /* 两种命名：MoRead-<平台>-<版本>[-signed].<ext> 与 MoRead-<版本>-unsigned.ipa。
+       平台名里带连字符（linux-x64 / mac-arm64），所以字符集必须含 `-`，且要非贪婪，
+       否则 `MoRead-` 后面拿到 `linux` 就断在 `x64` 上 —— 以前 Linux/macOS 那四行
+       从来没被更新过，就是这个原因（不是「没出包」）。 */
     let target = null;
-    const a = line.match(/MoRead-([A-Za-z0-9._]+)-(\d[\d.]*)(-[a-z]+)?\.(zip|apk|tar\.gz|hap|ipa)/);
+    const a = line.match(/MoRead-([A-Za-z0-9._-]+?)-(\d[\d.]*)(-[a-z]+)?\.(zip|apk|tar\.gz|hap|ipa)/);
     const b = line.match(/MoRead-(\d[\d.]*)(-[a-z]+)?\.ipa/);
     if (a) target = `MoRead-${a[1]}-${next}${a[3] || ''}.${a[4]}`;
     else if (b) target = `MoRead-${next}${b[2] || ''}.ipa`;
     if (!target) return line;                                     // 「同上 APK」这类不处理
-    if (!fs.existsSync(path.join(DIST, target))) return line;      // 这次没出的平台保留旧链接
+    if (!fs.existsSync(path.join(DIST, target))) {
+      const plat = (line.match(/^\|\s*([^|]+?)\s*\|/) || [])[1];
+      if (plat) stale.push(plat);
+      return line;                                                // 这次没出的平台保留旧链接
+    }
     return line
       .replace(/MoRead-(\d[\d.]*)(-[a-z]+)?\.ipa/g, `MoRead-${next}$2.ipa`)
-      .replace(/MoRead-([A-Za-z0-9._]+)-(\d[\d.]*)(-[a-z]+)?\.(zip|apk|tar\.gz|hap|ipa)/g,
+      .replace(/MoRead-([A-Za-z0-9._-]+?)-(\d[\d.]*)(-[a-z]+)?\.(zip|apk|tar\.gz|hap|ipa)/g,
         `MoRead-$1-${next}$3.$4`)
       .replace(/(releases\/download\/v)[\d.]+(\/)/g, `$1${next}$2`)
       .replace(/(versionCode\s*)\d+/, `$1${newCode}`);
   });
-  return newHead + rows.join('\n') + tail;
+  const newHead = stale.length
+    ? `**下载**（最新是 [Releases · v${next}](${REPO_URL}/releases/tag/v${next})；${stale.join(' / ')} 仍是旧版本（本期没有重出），链接指向旧标签，能用但功能落后）：\n`
+    : `**下载**（全平台产物都在 [Releases · v${next}](${REPO_URL}/releases/tag/v${next})，各平台同一套 \`ui/\`）：\n`;
+  return newHead + '\n' + rows.join('\n') + tail;
 });
 if (readme !== before) { write(README, readme); changed.push('README.md 下载区'); }
 

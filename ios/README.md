@@ -55,8 +55,8 @@ TEAM_ID=ABCDE12345 ./scripts/build-ipa.sh signed   # 用你的证书签好
 打印 `Info.plist` 的版本号、数一下 `.app/web/` 里的文件数，缺东西直接失败）。
 
 拿到未签名 ipa 后按下一节第 2 行做（Sideloadly / AltStore / 爱思助手，Windows 就行）。
-已发布的成品：<https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.7>
-（`MoRead-0.6.7-unsigned.ipa` 就挂在各版本的 Release 里，跟 Windows / Android 的包同一条发布）
+已发布的成品：<https://github.com/RoutineMiku/MoRead-Windows/releases/latest>
+（`MoRead-<版本>-unsigned.ipa` 挂在每个版本的 Release 里，跟 Windows / Android 的包同一条发布）
 
 **不要用的路子**：网上那些「在线 IPA 生成 / 免签安装」网站，要么只接受你自己上传的
 `Payload`（等于还是得有 Mac 先编出来），要么让你上传 Apple ID 换签名（账号风险），
