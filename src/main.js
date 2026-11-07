@@ -24,6 +24,10 @@ const parse = require('./parse');
 const legado = require('./legado');
 const webdav = require('./webdav');
 
+const IS_MAC = process.platform === 'darwin';
+const IS_LINUX = process.platform === 'linux';
+const IS_WIN = process.platform === 'win32';
+
 let win = null;
 let tray = null;
 let quitting = false;
@@ -43,11 +47,16 @@ function rlog(...args) {
 function createWindow() {
   /* 自动化验证用：MOREAD_WIN=390x844 时按指定尺寸开窗（模拟手机竖屏） */
   const ms = (process.env.MOREAD_WIN || '').match(/^(\d+)x(\d+)$/);
+  /* macOS 用系统红绿灯（hiddenInset），别自己画窗控；Windows / Linux 保持无边框自绘标题栏 */
+  const frameOpt = IS_MAC
+    ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 14 } }
+    : { frame: false };
+  const iconFile = path.join(ROOT, 'build', IS_WIN ? 'icon.ico' : 'icon.png');
   win = new BrowserWindow({
     width: ms ? +ms[1] : 1200, height: ms ? +ms[2] : 800,
     minWidth: ms ? 300 : 980, minHeight: ms ? 400 : 640,
-    frame: false, backgroundColor: '#eef0f4', show: false,
-    icon: fs.existsSync(path.join(ROOT, 'build', 'icon.ico')) ? path.join(ROOT, 'build', 'icon.ico') : undefined,
+    ...frameOpt, backgroundColor: '#eef0f4', show: false,
+    icon: fs.existsSync(iconFile) ? iconFile : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -117,7 +126,10 @@ function createTray() {
   const p = path.join(ROOT, 'build', 'tray.png');
   if (!fs.existsSync(p)) return;
   try {
-    tray = new Tray(nativeImage.createFromPath(p));
+    const img = nativeImage.createFromPath(p);
+    tray = new Tray(IS_MAC ? img.resize({ height: 18 }) : img);
+    /* macOS 菜单栏图标要跟随明暗主题：用单色模板图（只取 alpha 通道） */
+    if (IS_MAC && typeof tray.setIgnoreDoubleClickEvents === 'function') tray.setIgnoreDoubleClickEvents(true);
     tray.setToolTip('墨读');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: '显示主窗口', click: () => { if (win) { win.show(); win.focus(); } } },
@@ -126,6 +138,36 @@ function createTray() {
     ]));
     tray.on('click', () => { if (win) { win.isVisible() ? win.hide() : win.show(); } });
   } catch (e) { /* 托盘失败不影响主流程 */ }
+}
+
+/* macOS 必须有应用菜单：没有菜单栏，⌘C/⌘V/⌘Z 在输入框里全部失效。
+   Windows / Linux 继续用无菜单的极简界面。 */
+function buildMenu() {
+  if (!IS_MAC) { Menu.setApplicationMenu(null); return; }
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {
+      label: '墨读',
+      submenu: [
+        { role: 'about', label: '关于墨读' },
+        { type: 'separator' },
+        { role: 'hide', label: '隐藏墨读' },
+        { role: 'hideOthers', label: '隐藏其他' },
+        { type: 'separator' },
+        { label: '退出墨读', accelerator: 'Cmd+Q', click: () => { quitting = true; app.quit(); } }
+      ]
+    },
+    { label: '编辑', submenu: [
+      { role: 'undo', label: '撤销' }, { role: 'redo', label: '重做' }, { type: 'separator' },
+      { role: 'cut', label: '剪切' }, { role: 'copy', label: '拷贝' }, { role: 'paste', label: '粘贴' },
+      { role: 'selectAll', label: '全选' }
+    ] },
+    { label: '显示', submenu: [
+      { role: 'reload', label: '重新载入' },
+      { role: 'toggleDevTools', label: '开发者工具' }, { type: 'separator' },
+      { role: 'togglefullscreen', label: '全屏' }
+    ] },
+    { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'zoom', label: '缩放' }, { role: 'close', label: '关闭窗口' }] }
+  ]));
 }
 
 /* ---------------- 本地书 ---------------- */
@@ -266,6 +308,7 @@ function registerIpc() {
     version: app.getVersion(),
     electron: process.versions.electron,
     node: process.versions.node,
+    platform: process.platform,
     paths: store.dirs(),
     portable: app.getPath('userData') !== path.join(app.getPath('appData'), '墨读'),
     exeDir: path.dirname(app.getPath('exe'))
@@ -616,7 +659,8 @@ if (!gotLock) {
     if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
   });
   app.whenReady().then(() => {
-    Menu.setApplicationMenu(null);
+    buildMenu();
+    if (IS_LINUX) { try { app.setAppUserModelId && app.setAppUserModelId('com.routinemiku.moread'); } catch (e) {} }
     registerIpc();
     createWindow();
     createTray();

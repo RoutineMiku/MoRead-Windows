@@ -1,0 +1,12 @@
+{
+  "modelVersion": "5.0.0",
+  "dependencies": {
+    "@ohos/hvigor-ohos-plugin": "5.3.3"
+  },
+  "execution": {
+    "daemon": false
+  },
+  "logging": {},
+  "debugging": {},
+  "nodeOptions": {}
+}

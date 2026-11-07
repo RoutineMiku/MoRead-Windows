@@ -13,6 +13,17 @@
   const onDeviceStore = () => !!(S.info && S.info.platform === 'web' && S.info.dataStore === 'device');
   /* 浏览器里跑的版本（手机/电脑都算）：没有"文件路径"、没有拖放，交互要更明确一些 */
   const IS_WEB = !!(window.MoNativeBridge && window.MoNativeBridge.__isWeb);
+  /* 当前系统名（关于页 / 设置页展示用）：S.info.platform 由各端桥接层给 */
+  const OS_NAME = () => {
+    const p = (S.info && S.info.platform) || '';
+    if (IS_ANDROID) return 'Android';
+    return p === 'web' ? '网页版'
+      : p === 'darwin' ? 'macOS'
+      : p === 'linux' ? 'Linux'
+      : p === 'harmony' ? '鸿蒙'
+      : p === 'ios' ? 'iOS'
+      : 'Windows';
+  };
   const layoutMode = () => document.documentElement.getAttribute('data-layout') || '';
 
   const S = {
@@ -2082,7 +2093,7 @@
         </div>
 
         <div class="card">
-          <h3>朗读 <span class="chip">${IS_ANDROID ? '系统语音' : 'Windows 系统语音'}</span></h3>
+          <h3>朗读 <span class="chip">${IS_ANDROID ? '系统语音' : OS_NAME() + ' 系统语音'}</span></h3>
           <div class="row"><div class="rl">音色 / 语速 / 音调<small id="tts-cur">${esc(ttsCurrentLabel())}</small></div>
             <button class="btn sm" id="s-tts">设置</button></div>
           <div class="row"><div class="rl">读完自动下一章</div>
@@ -2183,7 +2194,7 @@
           <h3>关于</h3>
           <div class="row"><div class="rl">关于墨读<small>版本信息 · 开源地址 · 公众号</small></div>
             <button class="btn sm" id="open-about">查看</button></div>
-          <div class="row"><div class="rl">版本<small>${IS_ANDROID ? `墨读 ${esc(S.info.version)} · Android` : (S.info.platform === 'web' ? `墨读 ${esc(S.info.version)} · 网页版` : `墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}`)}</small></div>
+          <div class="row"><div class="rl">版本<small>${IS_ANDROID ? `墨读 ${esc(S.info.version)} · Android` : (S.info.platform === 'web' ? `墨读 ${esc(S.info.version)} · 网页版` : (S.info.platform === 'ios' || S.info.platform === 'harmony') ? `墨读 ${esc(S.info.version)} · ${OS_NAME()}` : `墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}`)}</small></div>
             <span class="rv">${IS_ANDROID ? '数据只存本机' : (S.info.portable ? '便携模式 · 数据在程序目录' : '数据只存本地')}</span></div>
           <div class="row"><div class="rl">数据位置<small>${esc(S.info.paths.root)}</small></div>
             ${IS_ANDROID ? '' : '<button class="link" id="open-dir2">打开</button>'}</div>
@@ -3544,8 +3555,7 @@
      三端共用这一个弹窗，图片走相对路径（ui/ 与 dist-web 里各放一份）。 */
   const GITHUB_URL = 'https://github.com/RoutineMiku/MoRead-Windows';
   function aboutPanel() {
-    const plat = S.info.platform === 'android' ? 'Android'
-      : (S.info.platform === 'web' ? '网页版' : (S.info.platform === 'darwin' ? 'macOS' : 'Windows'));
+    const plat = OS_NAME();
     openModal(`<div class="about">
       <img class="about-logo" src="logo.png" alt="墨读" />
       <div class="about-name">墨读</div>

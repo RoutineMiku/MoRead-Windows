@@ -1,0 +1,8 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "墨读阅读器" },
+    { "name": "EntryAbility_desc", "value": "本地优先的阅读器" },
+    { "name": "EntryAbility_label", "value": "墨读" },
+    { "name": "reason_internet", "value": "抓取你导入的书源网站正文" }
+  ]
+}

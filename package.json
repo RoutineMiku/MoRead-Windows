@@ -1,21 +1,27 @@
 {
   "name": "moread",
   "productName": "墨读",
-  "version": "0.6.1",
-  "description": "墨读 · Windows 桌面阅读器（本地书 + Legado 书源 + 网页搜书 + 坚果云同步）",
+  "version": "0.6.3",
+  "description": "墨读 · 本地优先的阅读器（Windows / Linux / macOS / Android / 网页 / 鸿蒙）",
   "main": "src/main.js",
-  "author": "MoRead",
+  "author": "routinemiku",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
     "pack": "node build/pack.js",
+    "pack:linux": "node build/pack-multi.js linux-x64 linux-arm64",
+    "pack:mac": "node build/pack-multi.js darwin-x64 darwin-arm64",
+    "pack:all": "node build/pack-multi.js --all",
     "dist": "node build/pack.js",
     "test": "node test/test-backup.js",
     "version:show": "node build/version.js",
     "version:bump": "node build/version.js --bump",
-  "web": "node build/gen-web.js",
-  "web:serve": "node build/gen-web.js && node build/serve-web.js",
-  "web:deploy": "node build/gen-web.js && node web/deploy-pages.js"
+    "web": "node build/gen-web.js",
+    "web:serve": "node build/gen-web.js && node build/serve-web.js",
+    "web:deploy": "node build/gen-web.js && node web/deploy-pages.js",
+    "harmony": "node build/gen-web.js && node build/sync-harmony.js",
+    "harmony:pack": "node build/build-hap.js",
+    "ios": "node build/gen-web.js && node build/sync-ios.js"
   },
   "devDependencies": {
     "electron": "^45.0.0",

@@ -1,0 +1,10 @@
+{
+  "appId": "cn.moread.app",
+  "appName": "墨读",
+  "webDir": "dist-web",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "backgroundColor": "#F4EFE6"
+  }
+}
