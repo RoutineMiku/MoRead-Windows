@@ -35,6 +35,8 @@ copy('web/manifest.webmanifest', path.join(out, 'manifest.webmanifest'));
 copy('web/icons/icon-192.png', path.join(out, 'icon-192.png'));
 copy('web/icons/icon-512.png', path.join(out, 'icon-512.png'));
 copy('web/icons/icon-180.png', path.join(out, 'icon-180.png'));
+copy('ui/gzh-qr.jpg', path.join(out, 'gzh-qr.jpg'));
+copy('ui/logo.png', path.join(out, 'logo.png'));
 
 /* ---- 2. bridge.js：Node 兼容层 + src 模块（与安卓同一份 runtime） ---- */
 const mods = {};

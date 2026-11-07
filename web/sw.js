@@ -14,7 +14,9 @@ const ASSETS = [
   './pako.min.js',
   './manifest.webmanifest',
   './icon-192.png',
-  './icon-512.png'
+  './icon-512.png',
+  './gzh-qr.jpg',
+  './logo.png'
 ];
 
 self.addEventListener('install', e => {

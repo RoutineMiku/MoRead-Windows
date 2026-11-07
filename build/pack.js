@@ -52,6 +52,29 @@ if (missing.length) throw new Error('运行时复制不完整：' + missing.join
 const srcExe = path.join(WORK, 'electron.exe');
 if (fs.existsSync(srcExe)) fs.renameSync(srcExe, path.join(WORK, 'moread.exe'));
 
+/* 2.5 把图标与版本信息写进 exe 资源。
+   只改快捷键/窗口图标不够——资源管理器里看到的那枚图标来自 exe 自身，
+   不打进去的话永远显示 Electron 的默认图标。rcedit 随 electron 依赖一起装好了。 */
+try {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const rce = path.join(ROOT, 'node_modules', 'rcedit', 'bin', 'rcedit-x64.exe');
+  if (fs.existsSync(rce) && fs.existsSync(path.join(ROOT, 'build', 'icon.ico'))) {
+    execFileSync(rce, [
+      path.join(WORK, 'moread.exe'),
+      '--set-icon', path.join(ROOT, 'build', 'icon.ico'),
+      '--set-file-version', pkg.version,
+      '--set-product-version', pkg.version,
+      '--set-version-string', 'FileDescription', '墨读',
+      '--set-version-string', 'ProductName', '墨读 MoRead',
+      '--set-version-string', 'CompanyName', 'routinemiku',
+      '--set-version-string', 'LegalCopyright', 'powered by routinemiku'
+    ], { stdio: 'inherit' });
+    console.log('exe 图标与版本信息已写入（' + pkg.version + '）');
+  }
+} catch (e) {
+  console.warn('写 exe 图标失败（不影响使用）：' + (e && e.message));
+}
+
 /* 3. 应用代码 → resources/app */
 const appDir = path.join(WORK, 'resources', 'app');
 fs.rmSync(path.join(WORK, 'resources', 'default_app.asar'), { force: true });

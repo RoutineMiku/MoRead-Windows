@@ -25,11 +25,17 @@ function defaults() {
     stats: {},
     settings: {
       fontSize: 19,
-      lineHeight: 2.0,
+      /* 1.7 接近纸书；旧版默认 2.0 太散，一屏少看四五列字（typoV2 迁移见 ui/app.js） */
+      lineHeight: 1.7,
       fontFamily: 'serif',
       theme: 'paper',
       pageMode: 'scroll',
+      /* 段距独立成 em 值：以前由行距推导（行距 2.0 时段距跟着 1.05em），
+         行距一调段距就跟着跳，用户没法单独把段落压紧 */
+      paraGapEm: 0.5,
       paraGap: true,
+      /* 排版迁移版本：0 = 还没按新默认值校正过 */
+      typoV: 0,
       autoSave: true,
       minimizeToTray: true,
       closeToTray: false,

@@ -594,7 +594,7 @@
 
     switch (name) {
       case 'env.info': return {
-        app: 'moread', platform: 'web', version: '0.6.0', code: 600, sdk: 0,
+        app: 'moread', platform: 'web', version: '0.6.1', code: 601, sdk: 0,
         device: (navigator.userAgent || '').slice(0, 80),
         paths: { root: '/moread', cache: '/cache', external: '' },
         webview: (navigator.userAgent || '').split(') ')[0] + ')',
