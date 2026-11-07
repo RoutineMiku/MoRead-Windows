@@ -267,6 +267,20 @@ html[data-shelf-size="sm"] .book .bm{font-size:10px;}
 .row-card .t{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px;}
 .row-card .s{font-size:11.5px;color:var(--faint);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .row-card .act{display:flex;gap:6px;align-items:center;}
+
+/* 搜索结果卡片：封面 + 书名（主）+ 书源标签（次）
+   以前书名取错时整行只剩站点名，看不出是哪本书；现在书名第一眼，来源在下面一排标签里 */
+.res-card{align-items:flex-start;}
+.res-cover{width:44px;height:58px;flex:0 0 44px;object-fit:cover;border-radius:6px;background:#eef1f6;
+  border:1px solid var(--line);}
+.res-srcs{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;align-items:center;}
+.chip.res-src{background:#eef4fd;border-color:#d8e5fb;color:#2a5bb8;font-size:10.5px;padding:1px 6px;
+  max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.chip.res-src.more{background:#f4f6f9;border-color:#eceff4;color:#6b7280;}
+.chip.res-kind{font-weight:400;}
+.chip.res-n{background:#f7f9fc;border-color:#e8edf5;color:#6b7280;font-size:10.5px;padding:1px 6px;}
+.pv-tags .btn{height:26px;padding:0 10px;font-size:12px;}
+
 .dot{width:7px;height:7px;border-radius:50%;background:#c9ced6;flex:0 0 auto;}
 .dot.ok{background:#22a06b;box-shadow:0 0 0 3px rgba(34,160,107,.13);}
 .dot.err{background:#e0574b;box-shadow:0 0 0 3px rgba(224,87,75,.13);}
@@ -1051,6 +1065,8 @@ html[data-layout] .wa-card-a{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap
 html[data-layout] .wa-card-a .btn{height:38px;padding:0 16px;border-radius:10px;}
 html[data-layout] .wa-label{font-size:12px;color:var(--faint);margin:2px 2px 8px;}
 html[data-layout] .wa-items{display:flex;flex-direction:column;gap:8px;}
+/* [hidden] 是 UA 样式，display:flex 会把它盖掉 —— 折叠的「其他结果」必须真的收起来 */
+html[data-layout] .wa-items[hidden]{display:none;}
 html[data-layout] .wa-item{
   display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;
   background:#fff;border:1px solid var(--line);border-radius:11px;padding:12px 13px;
@@ -1062,6 +1078,44 @@ html[data-layout] .wa-item-t{
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
 }
 html[data-layout] .wa-item-u{font-size:11.5px;color:var(--faint);}
+/* 每一条结果都带「预览 / 加入书架」：网页搜书也要能先看目录再决定 */
+html[data-layout] .wa-item-a{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap;}
+html[data-layout] .wa-item-a .btn{height:32px;padding:0 12px;border-radius:9px;font-size:12.5px;}
+html[data-layout] .wa-more{
+  width:100%;height:38px;margin:2px 0 10px;border-radius:10px;border:1px dashed var(--line);
+  background:transparent;color:var(--muted);font-size:13px;
+}
+html[data-layout] .wa-up-tip{font-size:12px;color:var(--accent);margin-top:6px;}
+/* ---------- 网页搜书的书卡片：书名在前，站点做成可点的标签（和书源搜索一致） ---------- */
+html[data-layout] .wb-list{display:flex;flex-direction:column;gap:10px;}
+html[data-layout] .wb-tip{font-size:11.5px;color:var(--faint);padding:0 2px 8px;}
+html[data-layout] .wb-card{
+  background:#fff;border:1px solid var(--line);border-radius:13px;padding:12px 13px 11px;
+  box-shadow:var(--shadow-sm);
+}
+html[data-layout] .wb-head{display:flex;gap:11px;align-items:flex-start;}
+html[data-layout] .wb-cover{
+  width:38px;height:50px;border-radius:6px;flex:0 0 38px;
+  background:linear-gradient(150deg,#3c63a6,#6d8fc9);color:#fff;
+  display:grid;place-items:center;font-size:17px;font-weight:650;
+}
+html[data-layout] .wb-info{flex:1;min-width:0;}
+html[data-layout] .wb-name{
+  font-size:16px;font-weight:650;color:var(--text);line-height:1.35;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+html[data-layout] .wb-sub{font-size:12px;color:var(--faint);margin-top:3px;}
+html[data-layout] .wb-sites{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+html[data-layout] .wb-site{
+  height:26px;padding:0 10px;border-radius:999px;border:1px solid var(--line);
+  background:#f7f9fc;color:var(--muted);font-size:12px;line-height:1;
+}
+html[data-layout] .wb-site.on{
+  border-color:#bcd2f6;background:rgba(43,108,224,.10);color:var(--accent);font-weight:600;
+}
+html[data-layout] .wb-act{display:flex;gap:8px;margin-top:11px;}
+html[data-layout] .wb-act .btn{height:36px;padding:0 15px;border-radius:10px;flex:0 0 auto;}
+html[data-layout] .wb-act .btn.done{opacity:.6;}
 html[data-layout] .wa-loading{display:flex;align-items:center;gap:10px;padding:28px 4px;color:var(--muted);font-size:13.5px;}
 html[data-layout] .wa-loading i{
   width:18px;height:18px;border-radius:50%;border:2px solid #dfe5ee;border-top-color:var(--accent);
