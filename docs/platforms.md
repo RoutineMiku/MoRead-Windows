@@ -49,7 +49,8 @@ Linux / macOS 走 `build/pack-multi.js`：
 npm run pack            # Windows
 npm run pack:linux      # Linux x64 + arm64
 npm run pack:mac        # macOS Intel + Apple Silicon
-npm run pack:all        # 四个一起（约 5 分钟，首次要下 4×120MB 运行时）
+npm run pack:all        # 四个一起（运行时已缓存在 .cache/electron 时约 1 分钟；
+                        # 首次要下 4×120MB，走 npmmirror，约 5 分钟）
 ```
 
 跨平台打得动，是因为这个项目**没有任何原生模块**（没有 sqlite3、没有 sharp、没有 node-gyp），
