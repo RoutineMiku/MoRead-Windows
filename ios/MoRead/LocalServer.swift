@@ -86,7 +86,7 @@ final class LocalServer {
         let sem = DispatchSemaphore(value: 0)
         var ready: UInt16?
         l.stateUpdateHandler = { state in
-            guard let state = state else { return }
+            // 注意：NWListener.State 不是 Optional，别写 guard let / case .failed?
             switch state {
             case .ready:
                 ready = l.port?.rawValue ?? candidate
@@ -116,7 +116,7 @@ final class LocalServer {
     private func accept(_ conn: NWConnection) {
         var buffer = Data()
         conn.stateUpdateHandler = { state in
-            if case .failed? = state { conn.cancel() }
+            if case .failed = state { conn.cancel() }
         }
         conn.start(queue: queue)
 
@@ -234,7 +234,8 @@ final class LocalServer {
         var s = b64url.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         while s.count % 4 != 0 { s += "=" }
         guard let data = Data(base64Encoded: s, options: .ignoreUnknownCharacters),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+              let json = try? JSONSerialization.jsonObject(with: data),
+              let obj = json as? [String: Any] else { return nil }
         var out: [String: String] = [:]
         for (k, v) in obj { out[k] = "\(v)" }
         return out
@@ -360,8 +361,8 @@ struct HTTPRequest {
         var headers: [String: String] = [:]
         for line in lines {
             guard let idx = line.firstIndex(of: ":") else { continue }
-            let key = line[line.startIndex..<idx].trimmingCharacters(in: .whitespaces).lowercased()
-            let val = line[line.index(after: idx)...].trimmingCharacters(in: .whitespaces)
+            let key = String(line[line.startIndex..<idx]).trimmingCharacters(in: .whitespaces).lowercased()
+            let val = String(line[line.index(after: idx)...]).trimmingCharacters(in: .whitespaces)
             headers[key] = val
         }
         let len = Int(headers["content-length"] ?? "0") ?? 0
