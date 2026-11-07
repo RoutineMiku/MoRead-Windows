@@ -1370,6 +1370,7 @@
       const c = await withTimeout(Engine.getContent(netGet, src, ch.url), 20000);
       let paras = c.paras || [];
       if (c.blocked) throw new Error('这个站要求人机验证（或本章是 VIP 章节），过一会儿再试，或换个源');
+      if (c.fail === 'json') throw new Error('这个源的正文是加密接口（返回 JSON 密文），本机解不开');
       if (paras.some(isRemoteImg)) paras = await resolveImgs(paras, src);
       if (!paras.length) throw new Error('正文为空');
       box.innerHTML = parasMap(paras, 360);
@@ -3598,6 +3599,8 @@
           const r = await withTimeout(Engine.getContent(netGet, src, ch.url), 20000);
           paras = r.paras;
           if (r.blocked) throw new Error('这个站要求人机验证（或本章是 VIP 章节），过一会儿再试，或换个源');
+          /* 站点把正文换成了加密 JSON 接口，书源规则又没解开 —— 别再显示一屏密文 */
+          if (r.fail === 'json') throw new Error('这个源的正文是加密接口（返回 JSON 密文），本机解不开。换一个源试试');
           if (!paras.length) throw new Error('正文为空，检查正文规则');
           /* 漫画章：先把图下回来再缓存，否则每次翻页都要重新下载，
              而且缓存里留下远程地址的话离线就全是白框 */
@@ -4531,6 +4534,23 @@
      第二次打开换源基本是立刻出列表，不用再等一轮网络。 */
   const SEARCH_MEMO = new Map();
   const MEMO_TTL = 10 * 60e3;
+  /* 目录也缓存：换回上次用过的源时不用再抓一遍（588 章那本书一次要 700ms+） */
+  const TOC_MEMO = new Map();
+  function memoTocGet(src, bookUrl) {
+    const m = TOC_MEMO.get(src.id + '|' + bookUrl);
+    return m && Date.now() - m.at < MEMO_TTL ? m.toc : null;
+  }
+  function memoTocPut(src, bookUrl, toc) {
+    if (TOC_MEMO.size > 60) TOC_MEMO.clear();
+    TOC_MEMO.set(src.id + '|' + bookUrl, { at: Date.now(), toc });
+  }
+  async function fetchToc(src, bookUrl) {
+    const hit = memoTocGet(src, bookUrl);
+    if (hit) return hit;
+    const toc = await withTimeout(Engine.getToc(netGet, src, bookUrl), 30000);
+    if (toc && toc.chapters && toc.chapters.length) memoTocPut(src, bookUrl, toc);
+    return toc;
+  }
   function memoSearch(src, kw) {
     const k = src.id + '|' + kw;
     const m = SEARCH_MEMO.get(k);
@@ -4542,6 +4562,12 @@
       if (SEARCH_MEMO.size > 400) SEARCH_MEMO.clear();
       SEARCH_MEMO.set(k, { at: Date.now(), hits });
       return hits;
+    }, err => {
+      /* 失败也记一笔：两千多个源里死源占大多数，不缓存的话每次打开换源面板
+         都要陪它们把超时再等一遍 */
+      if (SEARCH_MEMO.size > 400) SEARCH_MEMO.clear();
+      SEARCH_MEMO.set(k, { at: Date.now(), hits: [], dead: true });
+      throw err;
     });
     /* withTimeout 会先放手，底层请求失败时别冒成未处理的 rejection */
     p.catch(() => {});
@@ -4575,7 +4601,7 @@
     const srcs = pool.slice().sort(cmp).slice(0, cap);
     const srcRank = new Map(srcs.map((s, i) => [s.id, i]));
     const skipped = enabled.length - srcs.length;
-    const conc = isAndroidApp() ? 5 : 8;
+    const conc = isAndroidApp() ? 6 : 10;
     const kw = (typeof kwOverride === 'string' && kwOverride.trim())
       ? kwOverride.trim() : cleanSearchKw(b.name);
 
@@ -4672,35 +4698,65 @@
       if (r) applySwitch(r, btn);
     });
 
-    const worker = async () => {
+    /* 高级源（带 jsLib 的书源）执行规则时走同步请求，一发起就把主线程钉住几百毫秒到 1.5 秒。
+       以前它们和普通源一起被 8 个并发拉着跑，换源面板就一直在卡。
+       现在拆成两条队列：普通源照旧并发，高级源一次只跑一个，跑前先把控制权还给界面。 */
+    const isAdv = s => !!s.jsLib;
+    const plainSrcs = srcs.filter(s => !isAdv(s));
+    const advSrcs = srcs.filter(isAdv);
+    const stillOpen = () => !stopped && document.body.contains(box) && $('#modal').classList.contains('open');
+    const tryOne = async s => {
+      try {
+        const r = await withTimeout(memoSearch(s, kw), isAdv(s) ? 6000 : 4500);
+        const fresh = [];
+        for (const x of r) {
+          /* 整页兜底解析出来的「结果」多数不是书，换源列表里只会添乱 */
+          if (x.loose) continue;
+          const a = normChapTitle(x.name), t = normChapTitle(kw);
+          if (!(a === t || a.includes(t) || t.includes(a))) continue;
+          const key = x.sourceId + '|' + x.bookUrl;
+          if (keys.has(key)) continue;
+          keys.add(key);
+          hits.push(x);
+          fresh.push(x);
+        }
+        if (fresh.length) appendHits(fresh);
+      } catch (e) { /* 单个源失败不影响其他 */ }
+      done++;
+      progress();
+    };
+    const plainWorker = async () => {
       while (true) {
-        if (stopped || hits.length >= 20) return;
-        /* 弹窗关掉（或已经切到别的源）就别再搜了：安卓上继续跑只会拖慢后面的章节加载 */
-        if (!document.body.contains(box) || !$('#modal').classList.contains('open')) return;
+        if (stopped || hits.length >= 12) return;
+        if (!stillOpen()) return;
         const i = cursor++;
-        if (i >= srcs.length) return;
-        const s = srcs[i];
-        try {
-          const r = await withTimeout(memoSearch(s, kw), 7000);
-          const fresh = [];
-          for (const x of r) {
-            /* 整页兜底解析出来的「结果」多数不是书，换源列表里只会添乱 */
-            if (x.loose) continue;
-            const a = normChapTitle(x.name), t = normChapTitle(kw);
-            if (!(a === t || a.includes(t) || t.includes(a))) continue;
-            const key = x.sourceId + '|' + x.bookUrl;
-            if (keys.has(key)) continue;
-            keys.add(key);
-            hits.push(x);
-            fresh.push(x);
-          }
-          if (fresh.length) appendHits(fresh);
-        } catch (e) { /* 单个源失败不影响其他 */ }
-        done++;
-        progress();
+        if (i >= plainSrcs.length) return;
+        await new Promise(r => setTimeout(r, 0));      // 让界面先画一帧
+        await tryOne(plainSrcs[i]);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(conc, srcs.length) }, worker));
+    /* 高级源默认不搜：它们跑一次要把界面钉住 0.5~1.6 秒，
+       换源面板的主要体验应该是「立刻有列表」。想试的用户点一下就跑。 */
+    let advRunning = false;
+    const runAdv = async () => {
+      if (advRunning) return;
+      advRunning = true;
+      for (const s of advSrcs) {
+        if (stopped) return;
+        if (!stillOpen()) return;
+        const el = $('#sw-prog-t');
+        if (el) el.textContent = `正在试高级源 ${advSrcs.indexOf(s) + 1}/${advSrcs.length}：${s.name}（脚本源，界面会卡一下）`;
+        await new Promise(r => setTimeout(r, 30));
+        const before = hits.length;
+        await tryOne(s);
+        if (hits.length > before) {
+          box.classList.remove('searching');
+          box.insertAdjacentHTML('beforeend', hits.slice(before).map(rowHtml).join(''));
+          box.scrollTop = box.scrollHeight;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(conc, plainSrcs.length)) }, plainWorker));
     finished = true;
     sortHits();
     if (document.body.contains(box)) {
@@ -4711,7 +4767,27 @@
       const st = $('#sw-stop');
       if (st) st.remove();
       progress();
+      if (advSrcs.length) {
+        const bar = document.createElement('div');
+        bar.className = 'sw-adv';
+        bar.innerHTML = `<span>还有 ${advSrcs.length} 个「脚本书源」没试（规则是 JS，跑起来会卡一下界面）</span>
+          <button class="btn sm" id="sw-adv">试一下</button>`;
+        box.parentNode.insertBefore(bar, box.nextSibling);
+        const b2 = bar.querySelector('#sw-adv');
+        if (b2) b2.onclick = () => { b2.disabled = true; b2.textContent = '试运行中…'; runAdv(); };
+      }
     }
+  }
+
+  /* 阅读器顶部那行小字：换源/更新目录这种「要等一会儿」的动作拿它当进度条，
+     比弹窗好——不挡正文，也不会有第二个窗口跳出来打断阅读。 */
+  function showReaderBusy(msg) {
+    const el = $('#r-loading');
+    if (el) el.textContent = msg || '加载中…';
+  }
+  function hideReaderBusy() {
+    const el = $('#r-loading');
+    if (el) el.textContent = '';
   }
 
   async function applySwitch(r, btn) {
@@ -4724,15 +4800,21 @@
     const label = btn ? btn.textContent : '';
     const busy = on => { if (!btn) return; btn.disabled = on; btn.textContent = on ? '切换中…' : label; };
     busy(true);
-    toast('正在获取新源目录…');
+    /* 先把面板收掉：目录要抓 0.7~2 秒，让用户盯着一个不动的弹窗就是「卡」
+       （目录有缓存时下面几乎是瞬间完成的） */
+    const cached = memoTocGet(src, r.bookUrl);
+    closeModal();
+    showReaderBusy(`正在切到「${src.name}」…`);
     let toc;
     try {
-      toc = await withTimeout(Engine.getToc(netGet, src, r.bookUrl), 30000);
+      toc = await fetchToc(src, r.bookUrl);
     } catch (e) {
       busy(false);
+      hideReaderBusy();
       return toast('换源失败：' + (e.message || e));
     }
-    if (!toc.chapters.length) { busy(false); return toast('这个源没有目录，换一个试试'); }
+    if (!toc.chapters.length) { busy(false); hideReaderBusy(); return toast('这个源没有目录，换一个试试'); }
+    if (cached) hideReaderBusy();
 
     const curTitle = R.title || '';
     const curNorm = normChapTitle(curTitle);
@@ -4756,12 +4838,12 @@
     if (toc.info.intro && !b.intro) b.intro = toc.info.intro;
     await mo.cache.clear(b.id);
     save(true);
-    closeModal();
     renderShelf();          // 书架卡片上的来源名 / 进度跟着换，不然回到书架像没换成
     R.chapters = b.chapters;
     R.ci = idx;
     buildToc();
     if (R.book) await loadChapter(idx, 0);
+    hideReaderBusy();
     toast(`已换到「${src.name}」，定位到 ${toc.chapters[idx].title.slice(0, 20)}`);
   }
 

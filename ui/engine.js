@@ -633,6 +633,42 @@
     if (!xhr.status) throw new Error('网络不可达或请求被拦');
     return { status: xhr.status, text: xhr.responseText || '', headers: xhr.getAllResponseHeaders() || '', url };
   }
+  /* 书源自带请求头：Legado 里叫 header（单数、可以是 @js: 脚本、也可以是 JSON 字符串）。
+     以前只读 src.headers（复数对象），于是所有靠 Referer/UA/签名头才给数据的站
+     一律返回空列表 —— 换源面板里搜不到书、网页书抓不到正文都是这么来的。 */
+  const HEADER_CACHE = new WeakMap();
+  function srcHeaders(src) {
+    if (!src) return {};
+    const hit = HEADER_CACHE.get(src);
+    if (hit && Date.now() - hit.at < 60000) return hit.h;
+    let h = {};
+    let raw = src.header;
+    if (raw && typeof raw === 'string') {
+      let txt = raw.trim();
+      if (/^@js:/i.test(txt) || /^\{\{[\s\S]*\}\}$/.test(txt)) {
+        const expr = txt.replace(/^@js:/i, '').replace(/^\{\{|\}\}$/g, '');
+        const out = runJs(expr, { src, baseUrl: src.url || '', html: '', result: '' });
+        txt = out == null ? '' : String(out);
+      }
+      if (txt) {
+        try {
+          const j = JSON.parse(txt);
+          if (j && typeof j === 'object') h = j;
+        } catch (e) {
+          txt.split(/\r?\n/).forEach(line => {
+            const i = line.indexOf(':');
+            if (i > 0) h[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+          });
+        }
+      }
+    } else if (raw && typeof raw === 'object') {
+      h = Object.assign({}, raw);
+    }
+    if (src.headers && typeof src.headers === 'object') h = Object.assign({}, h, src.headers);
+    HEADER_CACHE.set(src, { at: Date.now(), h });
+    return h;
+  }
+
   function headerArg(h) {
     if (!h) return {};
     if (typeof h === 'string') {
@@ -720,7 +756,23 @@
     return factory;
   }
 
-  /* ---------- JS 求值 ---------- */
+  /* ---------- JS 求值 ----------
+   * 出错时以前是静默 return undefined，结果就是「书源规则明明写了却像没生效」，
+   * 排查只能靠猜。这里留一个环形缓冲，探针（window.__jsErr）和调试面板都能看。 */
+  const _jsErr = (typeof window !== 'undefined') ? (window.__jsErr = window.__jsErr || []) : [];
+  function logJsErr(expr, e, src) {
+    try {
+      _jsErr.push({
+        src: (src && src.name) || '',
+        rule: String(expr).replace(/\s+/g, ' ').slice(0, 140),
+        msg: (e && (e.message || e.toString())) || String(e),
+        stack: String((e && e.stack) || '').split('\n').slice(0, 3).join(' | ')
+      });
+      if (_jsErr.length > 30) _jsErr.shift();
+      console.warn('[书源JS] ' + ((src && src.name) || '') + ' ' + String(expr).slice(0, 60) + ' → ' + ((e && e.message) || e));
+    } catch (e2) { /* 日志本身不能再抛 */ }
+  }
+
   function runJs(expr, vars) {
     const v = vars || {};
     const src = v.src || null;
@@ -741,6 +793,7 @@
         'with(scope){ return (' + expr + '); }');
       return fn(scope.java, scope.source, scope, scope.baseUrl, scope.result, scope.html, scope.key);
     } catch (e) {
+      logJsErr(expr, e, src);
       return undefined;
     }
   }
@@ -1003,8 +1056,9 @@
 
   /* ---------- 网络 + 解析 ---------- */
   async function fetchDoc(fetchFn, url, src, extra) {
-    const o = Object.assign({ url, charset: src.charset || 'auto', headers: src.headers }, extra || {});
-    if (extra && extra.headers) o.headers = Object.assign({}, src.headers || {}, extra.headers);
+    const baseH = srcHeaders(src);
+    const o = Object.assign({ url, charset: src.charset || 'auto', headers: baseH }, extra || {});
+    if (extra && extra.headers) o.headers = Object.assign({}, baseH, extra.headers);
     const r = await fetchFn(o);
     if (!r || !r.ok) throw new Error((r && r.error) || '请求失败');
     if (r.status >= 400) {
@@ -1766,8 +1820,13 @@
   }
 
   /** 从一页 HTML 里抽正文（规则 → 常见容器 → 最长块，取质量最高的一份） */
-  function extractParas(root, url, src) {
-    const base = { doc: root, root, html: '', baseUrl: url, json: {}, src };
+  function extractParas(root, url, src, rawHtml) {
+    /* JS 正文规则（@js:yuluNovelContent(java, source, result, baseUrl)）里的 result 就是
+       这个地址的**原始响应体**：以前这里传的是空串，于是 JSON.parse('') 直接抛
+       「Unexpected end of JSON input」，规则失败后回退到整页文本 —— 用户看到的就是
+       一整屏 {"code":1,"data":{"content":"9qfnc..." 的密文。 */
+    const body = rawHtml || '';
+    const base = { doc: root, root, html: body, result: body, baseUrl: url, json: {}, src };
     const rule = src.ruleContent.content;
 
     // 收集多路候选，取“正文质量”最高的一份（站点改版/规则失配时不至于抓到导航块）
@@ -1895,7 +1954,7 @@
       return { paras: [], blocked: true, title: (root.title || '').trim(), from: 'blocked' };
     }
     const rule = src.ruleContent.content;
-    const got = extractParas(root, url, src);
+    const got = extractParas(root, url, src, html);
     let paras = got.paras;
 
     /* ---------- 漫画章 ----------
@@ -1928,7 +1987,41 @@
         if (contentScore(body) > contentScore(paras)) { paras = body; got.from = 'body'; }
       }
     }
+    /* 正文接口只给了一段 JSON（书源规则没解开 / 站点换成加密接口）时，
+       绝不能再把 {"code":1,"data":{"content":"9qfnc..."}} 当正文显示：
+       先试着从 content 字段里捞明文，实在捞不到就明确告诉用户「这源读不了」。 */
+    const jf = jsonContentParas(paras);
+    if (jf) return jf;
     return { paras, title: (root.title || '').trim(), from: got.from };
+  }
+
+  /** 正文是一段 JSON 信封时：能捞出明文就返回段落，捞不到返回 fail:'json' */
+  function jsonContentParas(paras) {
+    const joined = (paras || []).join('\n').trim();
+    if (!joined || joined[0] !== '{' || joined.length < 40) return null;
+    if (!/"(code|data|content|ver)"\s*:/.test(joined)) return null;
+    const cjk = (joined.match(/[\u4e00-\u9fa5]/g) || []).length;
+    if (cjk / joined.length > 0.1) return null;      // 正常正文里偶尔带 JSON，别误伤
+    let obj = null;
+    try { obj = JSON.parse(joined); } catch (e) { obj = null; }
+    const raw = obj && (obj.data && (obj.data.content || obj.data.text) || obj.content || obj.text);
+    if (typeof raw === 'string' && raw.length > 40) {
+      const plain = decodeMaybeB64(raw);
+      if (plain && (plain.match(/[\u4e00-\u9fa5]/g) || []).length > 40) {
+        return { paras: htmlToParas(plain), title: '', from: 'json-plain' };
+      }
+    }
+    return { paras: [], fail: 'json', from: 'json' };
+  }
+
+  /** base64 里要是明文（不少站只是 base64 挡一下）就还原，解出乱码就返回 '' */
+  function decodeMaybeB64(s) {
+    if (!/^[A-Za-z0-9+/=\s]{40,}$/.test(s)) return '';
+    try {
+      const t = bytesToStr(b64Bytes(s));
+      const ok = (t.match(/[\u4e00-\u9fa5]/g) || []).length;
+      return ok > 20 ? t : '';
+    } catch (e) { return ''; }
   }
 
   /** 找「图片最密、文字最少」的那块容器：漫画章节的图都集中在这里 */
