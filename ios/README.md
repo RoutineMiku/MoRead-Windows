@@ -42,10 +42,33 @@ TEAM_ID=ABCDE12345 ./scripts/build-ipa.sh signed   # 用你的证书签好
 要求：Xcode 15+、iOS 15.0+。命令行构建用的是
 `xcodebuild ... CODE_SIGNING_ALLOWED=NO`，不需要任何账号。
 
+## 二·五、没有 Mac 怎么办：用 GitHub Actions 的 macOS runner（免费）
+
+`.github/workflows/ios-ipa.yml` 已经把这件事做成了点一下就有：
+
+- 仓库 **Actions → 「iOS 未签名 ipa」→ Run workflow**（或 push 一个 `ios-v*` 标签自动跑）
+- 跑完在 **Artifacts** 里下 `MoRead-ipa-<版本>`，解开就是 `MoRead-<版本>-unsigned.ipa`
+- 全程不需要任何账号、证书、密钥；公开仓库的 macOS runner 不扣分钟数
+
+工作流做的事和本地等价：`node build/gen-web.js && node build/sync-ios.js` →
+`xcodebuild ... CODE_SIGNING_ALLOWED=NO` → 组 `Payload/` → zip 成 ipa（外加快照校验：
+打印 `Info.plist` 的版本号、数一下 `.app/web/` 里的文件数，缺东西直接失败）。
+
+拿到未签名 ipa 后按下一节第 2 行做（Sideloadly / AltStore / 爱思助手，Windows 就行）。
+已发布的成品：<https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.3-ios>
+
+**不要用的路子**：网上那些「在线 IPA 生成 / 免签安装」网站，要么只接受你自己上传的
+`Payload`（等于还是得有 Mac 先编出来），要么让你上传 Apple ID 换签名（账号风险），
+要么给的是 MDM 描述文件式的「企业签」（随时被吊销、装完打不开）。云 macOS 是唯一
+既免费又不碰你账号的在线路径；Codemagic / Bitrise / Appcircle 也是同一原理，
+只是免费额度和配置复杂度不同。
+
 ## 三、签名安装（三种，按你有没有 Mac / 有没有开发者账号选）
 
 | 方式 | 需要 | 有效期 | 做法 |
 |---|---|---|---|
+| **现成未签名 ipa** | 一台 Windows/Mac | 7 天 | 下 [Releases 里的 ipa](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.3-ios) → Sideloadly 填入 Apple ID → 装 |
+| **GitHub Actions 自己出** | 一个 GitHub 账号 | 同上 | Actions 里跑 `ios-ipa.yml`，Artifacts 拿 ipa（见「二·五」） |
 | **Xcode 直连真机** | Mac + 任意 Apple ID | 7 天，到期重连一次 | Xcode 里填 Team（免费账号就是个人 Apple ID）→ Run |
 | **未签名 ipa + 重签工具** | Windows 也行 | 7 天 | 拿 `MoRead-<版本>-unsigned.ipa`，用 **Sideloadly / AltStore / 爱思助手** 载入，输自己的 Apple ID 签 |
 | **付费开发者账号** | ￥688/年 | 1 年，可 TestFlight | `TEAM_ID=... ./scripts/build-ipa.sh signed` |

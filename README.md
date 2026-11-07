@@ -17,7 +17,7 @@
 | Android 7+ | [`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3-android/MoRead-android.apk) | 直接安装，WebView 内置 Node 兼容层 |
 | 鸿蒙 4.x 及以下 | 同上 APK | 系统自带安卓兼容，直接装 |
 | 鸿蒙 NEXT (5.0) | `MoRead-harmony-0.6.3.hap` | ArkWeb 壳；未签名包自己用 DevEco / 自己的证书签，也提供 SDK 测试 CA 自签版，见 `harmony/README.md` |
-| iOS 15+ | `ios/` Xcode 工程 → `MoRead-0.6.3-unsigned.ipa` | 需 Mac 编译；内置本地服务与抓书代理，自己用 Apple ID 签，见 `ios/README.md` |
+| iOS 15+ | [`MoRead-0.6.3-unsigned.ipa`](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.3-ios) | 未签名 ipa（GitHub Actions 的 macOS runner 编的），Sideloadly 填自己 Apple ID 装；工程在 `ios/`，见 `ios/README.md` |
 | 网页版 / iPad PWA | **<https://routinemiku.github.io/MoRead-Windows/>** | 免安装免账号，Safari「添加到主屏幕」即得全屏图标 |
 
 各平台怎么打、有哪些已知限制：**[docs/platforms.md](docs/platforms.md)**
