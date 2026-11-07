@@ -82,14 +82,46 @@ input,select,textarea{font-family:inherit;font-size:13px;color:inherit;}
 }
 .page-head h1{font-size:20px;margin:0;font-weight:650;letter-spacing:.3px;}
 .page-head .sub{color:var(--muted);font-size:12.5px;padding-bottom:3px;}
-.head-tools{margin-left:auto;display:flex;gap:8px;align-items:center;}
+.head-tools{margin-left:auto;display:flex;gap:8px;align-items:center;min-width:0;}
 
 .searchbox{
   display:flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);
-  border-radius:9px;padding:0 10px;height:34px;box-shadow:var(--shadow-sm);width:260px;
+  border-radius:9px;padding:0 10px;height:34px;box-shadow:var(--shadow-sm);width:260px;min-width:0;
 }
-.searchbox svg{width:15px;height:15px;stroke:#9aa1ab;fill:none;stroke-width:1.8;}
-.searchbox input{border:none;outline:none;background:none;flex:1;height:100%;font-size:13px;user-select:text;}
+.searchbox svg{width:15px;height:15px;stroke:#9aa1ab;fill:none;stroke-width:1.8;flex:0 0 auto;}
+.searchbox input{border:none;outline:none;background:none;flex:1;height:100%;font-size:13px;user-select:text;min-width:0;}
+
+/* 搜索结果卡片整块可点（打开预览） */
+.row-card.click{cursor:pointer;}
+.row-card.click:hover{background:#fbfcfe;}
+
+/* ---------- 结果预览弹窗 ---------- */
+.pv-title{margin:0 0 12px;}
+.pv-top{display:flex;gap:14px;align-items:flex-start;}
+.pv-cover{
+  width:78px;height:106px;flex:0 0 78px;border-radius:8px;overflow:hidden;background:var(--line);
+  display:grid;place-items:center;font-size:26px;color:#fff;font-weight:600;
+  background-image:linear-gradient(135deg,#5b83c9,#274a86);
+}
+.pv-cover.ph{background-image:linear-gradient(135deg,#5b83c9,#274a86);}
+.pv-cover img{width:100%;height:100%;object-fit:cover;}
+.pv-meta{flex:1;min-width:0;}
+.pv-name{font-size:16px;font-weight:650;line-height:1.35;}
+.pv-author{font-size:12.5px;color:var(--muted);margin-top:3px;}
+.pv-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
+.pv-intro{font-size:12.5px;color:#5b6270;line-height:1.6;margin-top:8px;max-height:78px;overflow:auto;}
+.pv-toc-head{font-size:13px;font-weight:600;margin:16px 0 8px;}
+.pv-toc-head .sub{font-weight:400;color:var(--muted);font-size:12px;margin-left:6px;}
+.pv-toc{max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:9px;padding:6px;background:#fbfcfd;}
+.pv-ch{display:block;width:100%;text-align:left;padding:8px 10px;border:none;background:none;
+  font-size:13px;color:var(--ink);border-radius:7px;cursor:pointer;}
+.pv-ch:hover{background:#eef2f8;}
+.pv-ch-title{font-size:13px;color:var(--muted);margin:-6px 0 10px;}
+.pv-read{max-height:52vh;overflow:auto;padding:4px 2px;font-size:15px;line-height:1.85;}
+.pv-read p{margin:0 0 .8em;}
+.pv-read img.r-img{display:block;max-width:100%;margin:8px auto;border-radius:6px;}
+html[data-layout="portrait"] .pv-toc{max-height:190px;}
+html[data-layout="portrait"] .pv-read{max-height:44vh;}
 
 .btn{
   height:34px;padding:0 13px;border-radius:9px;font-size:13px;display:inline-flex;align-items:center;gap:6px;
@@ -490,13 +522,13 @@ html[data-theme="night"] .about-link{background:rgba(255,255,255,.06);border-col
 /* ---------------- 网页搜书（内置浏览器） ---------------- */
 #view-web{padding:0;overflow:hidden;}
 .web-bar{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--line);
-  background:#fff;flex:0 0 auto;}
-.wb-nav{display:flex;gap:2px;}
-.wbtn{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:#5b6472;}
+  background:#fff;flex:0 0 auto;flex-wrap:wrap;min-width:0;}
+.wb-nav{display:flex;gap:2px;flex:0 0 auto;}
+.wbtn{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:#5b6472;flex:0 0 auto;}
 .wbtn:hover{background:#f2f4f7;color:var(--text);}
 .wbtn:disabled{opacity:.32;cursor:default;}
 .wbtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;}
-.w-url{flex:1;height:30px;border:1px solid var(--line);border-radius:8px;padding:0 11px;font-size:12.5px;
+.w-url{flex:1 1 120px;min-width:0;height:30px;border:1px solid var(--line);border-radius:8px;padding:0 11px;font-size:12.5px;
   background:#f7f8fa;color:var(--text);user-select:text;}
 .w-url:focus{outline:none;background:#fff;border-color:#9dbcf5;box-shadow:0 0 0 3px rgba(43,108,224,.12);}
 .w-engine{height:30px;border:1px solid var(--line);border-radius:8px;padding:0 6px;font-size:12px;background:#fff;color:var(--text);}
@@ -747,9 +779,10 @@ html[data-layout="portrait"] .page-head .sub{
      留两行刚好够，再长才省略 */
   white-space:normal;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
 }
-html[data-layout="portrait"] .head-tools{margin-left:auto;width:auto;flex:0 1 auto;}
+html[data-layout="portrait"] .head-tools{margin-left:0;width:100%;flex:1 1 100%;min-width:0;}
 html[data-layout="portrait"] .searchbox{width:auto;flex:1 1 auto;height:40px;min-width:0;}
-html[data-layout="portrait"] .head-tools .btn{padding:0 12px;white-space:nowrap;}
+html[data-layout="portrait"] .searchbox input{min-width:0;}
+html[data-layout="portrait"] .head-tools .btn{padding:0 12px;white-space:nowrap;flex:0 0 auto;}
 
 /* 书卡三列：96px 起步会挤成五列，书名只剩两个字，点也点不准 */
 html[data-layout="portrait"] .grid{--shelf-base:148px;gap:16px 11px;padding:0 14px 8px;}

@@ -223,6 +223,23 @@ final class LocalServer {
             }
             let http = resp as? HTTPURLResponse
             let body = data ?? Data()
+            /* 取图（漫画）：代理不能按文本解码，直接回 base64 JSON，
+               前端 bridge-web 看到 b64 就还原成原始字节。 */
+            if q["b64"] == "1" {
+                let ct = (http?.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+                let mime = ct.split(separator: ";").first.map(String.init) ?? "application/octet-stream"
+                let pack: [String: Any] = [
+                    "status": http?.statusCode ?? 200,
+                    "mime": mime.isEmpty ? "application/octet-stream" : mime,
+                    "b64": body.base64EncodedString(),
+                    "bytes": body.count,
+                    "url": http?.url?.absoluteString ?? raw
+                ]
+                let json = (try? JSONSerialization.data(withJSONObject: pack)) ?? Data("{}".utf8)
+                self.send(conn, status: http?.statusCode ?? 200,
+                          type: "application/json; charset=utf-8", body: json)
+                return
+            }
             let charset = self.charset(response: http, body: body, hint: q["charset"] ?? "auto")
             let text = self.decode(body, charset: charset)
             self.send(conn, status: http?.statusCode ?? 200,

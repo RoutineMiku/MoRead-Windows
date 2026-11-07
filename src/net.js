@@ -125,4 +125,47 @@ async function fetchText(url, opts = {}) {
   };
 }
 
-module.exports = { fetchText, request, decode };
+/**
+ * 取二进制（漫画页的图片）。
+ * 为什么不直接让 <img src> 指远程地址：漫画站几乎都校验 Referer，
+ * WebView/渲染进程直连会拿到 403 的占位图，白框一片；这里带着书源 headers 下回来，
+ * 再以 data URL 交给阅读器，既不受防盗链也不受页面 CSP 限制。
+ */
+async function fetchBinary(url, opts = {}) {
+  const t0 = Date.now();
+  let res;
+  try {
+    res = await request(url, Object.assign({}, opts, { maxBytes: opts.maxBytes || 8 * 1024 * 1024 }));
+  } catch (e) {
+    if (!opts.insecure && CERT_ERR.test(String(e && (e.code || e.message)))) {
+      res = await request(url, Object.assign({}, opts, { insecure: true, maxBytes: opts.maxBytes || 8 * 1024 * 1024 }));
+    } else {
+      throw e;
+    }
+  }
+  const ct = String(res.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  /* 有些站把图片当 octet-stream 发，只能靠文件头猜 */
+  const mime = /^image\//.test(ct) ? ct : sniffImageMime(res.buffer) || ct || 'application/octet-stream';
+  return {
+    status: res.status,
+    url: res.url,
+    mime,
+    bytes: res.buffer.length,
+    b64: res.buffer.toString('base64'),
+    ms: Date.now() - t0
+  };
+}
+
+/** 图片文件头识别（Content-Type 不靠谱时兜底） */
+function sniffImageMime(buf) {
+  if (!buf || buf.length < 12) return '';
+  const b = buf;
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'image/gif';
+  if (b.slice(0, 4).toString('ascii') === 'RIFF' && b.slice(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  if (b[0] === 0x42 && b[1] === 0x4d) return 'image/bmp';
+  return '';
+}
+
+module.exports = { fetchText, fetchBinary, request, decode };

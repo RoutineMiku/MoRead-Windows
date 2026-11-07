@@ -858,6 +858,70 @@
       .filter(s => s.length > 0);
   }
 
+  /* ---------- 漫画：图片抽取 ----------
+   * 段落协议里用 `@img:<绝对地址>` 表示一张图，前端拿到后自己下载成 data URL
+   * （很多漫画站校验 Referer，直接 <img src> 会被防盗链挡成白框）。
+   * 只认“像正文插图”的图：跳过 1x1 统计图、data: 占位图、广告域名。 */
+  const IMG_SKIP = /(?:^|\/)(?:spacer|blank|loading|lazy|pixel|1x1|logo|icon|avatar|qr|banner)[^/]*\.(?:gif|png|jpe?g|webp)$/i;
+  const IMG_AD = /(?:ad|ads|adv|gg|guanggao|stat|analytics|beacon)[-_.\/]/i;
+
+  function imgUrlOf(el, baseUrl) {
+    const raw = el.getAttribute('data-src') || el.getAttribute('data-original')
+      || el.getAttribute('data-lazy-src') || el.getAttribute('data-echo')
+      || el.getAttribute('src') || '';
+    if (!raw || /^data:/i.test(raw) || /^blob:/i.test(raw)) return '';
+    const w = +(el.getAttribute('width') || 0), h = +(el.getAttribute('height') || 0);
+    if ((w && w < 40) || (h && h < 40)) return '';
+    const u = absUrl(baseUrl, raw);
+    if (!/^https?:/i.test(u)) return '';
+    if (IMG_SKIP.test(u) || IMG_AD.test(u)) return '';
+    return u;
+  }
+
+  /** 从一段 HTML 里按顺序抽图片地址（去重、保序） */
+  function imgList(html, baseUrl) {
+    const d = document.createElement('div');
+    d.innerHTML = String(html || '').replace(/<(script|style)[\s\S]*?<\/\1>/gi, '');
+    const out = [];
+    const seen = new Set();
+    for (const el of d.querySelectorAll('img')) {
+      const u = imgUrlOf(el, baseUrl);
+      if (!u || seen.has(u)) continue;
+      seen.add(u);
+      out.push(u);
+      if (out.length >= 80) break;
+    }
+    return out;
+  }
+
+  /** 图文混杂的正文：文字段落和图片按文档顺序排好，供前端渲染 */
+  function htmlToParasRich(html, baseUrl) {
+    const src = String(html || '')
+      .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+      .replace(/<img\b[^>]*>/gi, m => {
+        const el = document.createElement('div');
+        el.innerHTML = m;
+        const u = imgUrlOf(el.querySelector('img'), baseUrl);
+        return u ? '\n@@IMG@@' + u + '@@IMG@@\n' : '';
+      })
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|section|figure)>/gi, '\n');
+    const d = document.createElement('div');
+    d.innerHTML = src;
+    return (d.textContent || '')
+      .replace(/\u00a0/g, ' ')
+      .split(/\n+/)
+      .map(s => s.trim())
+      .flatMap(s => {
+        if (!s) return [];
+        /* 一行里可能夹着一张图：拆成「文字 / 图片」多条 */
+        const parts = s.split(/@@IMG@@/);
+        return parts.map(p => p.trim()).filter(Boolean).map(p =>
+          /^https?:\/\//i.test(p) && /@@IMG@@/.test(s) ? '@img:' + p : p);
+      })
+      .filter(s => s.length > 0);
+  }
+
   /* ---------- 书源归一化（Legado JSON → 内部结构） ---------- */
   function normalizeSource(raw) {
     const s = raw || {};
@@ -1140,6 +1204,26 @@
     return hit ? hit.u : '';
   }
 
+  /** 跟「目录 / 全部章节」链接抓一次完整目录（步骤 3 与「章节太少」兜底共用） */
+  async function tocFromLink(fetchFn, src, root, url) {
+    const link = findTocLink(root, url);
+    if (!link) return null;
+    try {
+      const t = await fetchDoc(fetchFn, link, src);
+      const r2 = doc(t.html);
+      let c = dedupeChapters(pickChapters(r2, t.url, src, null, t.html));
+      let loose = false;
+      if (c.length < 3) {
+        for (const sel of TOC_SELECTORS) {
+          const rows = simpleChapters(r2, t.url, sel);
+          if (rows.length > c.length) { c = dedupeChapters(rows); loose = true; }
+        }
+      }
+      if (c.length < 3) return null;
+      return { chapters: loose ? fixOrder(c) : c, url: t.url, fallback: loose };
+    } catch (e) { return null; }
+  }
+
   async function getToc(fetchFn, src, bookUrl) {
     const got = await fetchDoc(fetchFn, bookUrl, src);
     let html = got.html, url = got.url;
@@ -1183,27 +1267,21 @@
     let chapters = dedupeChapters(pickChapters(root, url, src, json0, html));
     if (chapters.length >= 3) {
       chapters = dedupeChapters(await followTocPages(fetchFn, src, { root, url, html, json: json0 }, chapters));
+      /* 详情页常只挂「最新章节」十来条，完整目录在另一个页面。
+         章节数明显偏少时再跟一次「目录 / 全部章节」，取更大的那份 ——
+         否则书架里的书只有最后十几章，读起来「章节不对」。 */
+      if (chapters.length < 40) {
+        const full = await tocFromLink(fetchFn, src, root, url);
+        if (full && full.chapters.length > chapters.length) {
+          return { chapters: full.chapters, info, tocUrl: full.url, fallback: full.fallback };
+        }
+      }
       return { chapters, info, tocUrl: url };
     }
 
     // 3) 跟随「目录 / 全部章节」链接再试
-    const link = findTocLink(root, url);
-    if (link) {
-      try {
-        const t = await fetchDoc(fetchFn, link, src);
-        const r2 = doc(t.html);
-        let c = dedupeChapters(pickChapters(r2, t.url, src, null, t.html));
-        let loose = false;
-        if (c.length < 3) {
-          for (const sel of TOC_SELECTORS) {
-            const rows = simpleChapters(r2, t.url, sel);
-            if (rows.length > c.length) { c = dedupeChapters(rows); loose = true; }
-          }
-        }
-        if (c.length >= 3) return { chapters: loose ? fixOrder(c) : c, info, tocUrl: t.url, fallback: loose };
-        if (c.length > chapters.length) chapters = c;
-      } catch (e) { /* 继续 */ }
-    }
+    const full = await tocFromLink(fetchFn, src, root, url);
+    if (full) return { chapters: full.chapters, info, tocUrl: full.url, fallback: full.fallback };
 
     // 4) 当前页按常见容器兜底（站点改版导致规则失效时）
     let loose = false;
@@ -1290,12 +1368,46 @@
     }
     let paras = best ? best.p : [];
 
+    /* ---------- 漫画章 ----------
+     * 判据：这一章里挂着几张「像正文插图」的图，而文字少得可怜。
+     * 小说站的广告图通常混在正文里但字数很多，所以字数够就仍然按文字走。 */
+    const comicNode = comicBestNode(root, rule);
+    if (comicNode) {
+      const rich = htmlToParasRich(comicNode.innerHTML || '', url);
+      const imgN = rich.filter(p => p.indexOf('@img:') === 0).length;
+      if (imgN >= 2 && contentScore(paras) < 600) {
+        return { paras: rich, title: (root.title || '').trim(), from: 'comic', comic: true };
+      }
+    }
+
     // 实在太短（可能被反爬/验证页拦了）时，退回整页文本，让上层提示而不是白屏
     if (contentScore(paras) < 80) {
       const body = cleanParas(htmlToParas(root.body ? root.body.innerHTML : ''));
       if (contentScore(body) > contentScore(paras)) { paras = body; best = { from: 'body' }; }
     }
     return { paras, title: (root.title || '').trim(), from: best && best.from };
+  }
+
+  /** 找「图片最密、文字最少」的那块容器：漫画章节的图都集中在这里 */
+  function comicBestNode(root, rule) {
+    const nodes = [];
+    if (rule) {
+      try { nodes.push(...selectNodes(root, rule)); } catch (e) { /* 规则不合法就算了 */ }
+    }
+    for (const sel of CONTENT_SELECTORS) {
+      try { nodes.push(...root.querySelectorAll(sel)); } catch (e) { /* 忽略 */ }
+    }
+    nodes.push(root.body || root);
+    let best = null, bestScore = 0;
+    for (const n of nodes) {
+      if (!n || !n.querySelectorAll) continue;
+      const imgs = n.querySelectorAll('img').length;
+      if (imgs < 2) continue;
+      const chars = (n.textContent || '').replace(/\s+/g, '').length;
+      const score = imgs * 60 - chars / 30;
+      if (score > bestScore) { bestScore = score; best = n; }
+    }
+    return best;
   }
 
   /* ---------- 任意网页自动识别（网页搜书 / 加书架用） ---------- */
@@ -1529,8 +1641,22 @@
     const toc = autoToc(root, baseUrl);
     const content = autoContent(root);
     const serp = autoSerpLinks(root, baseUrl);
+    /* 漫画：图片成片、文字很少 —— 详情页/阅读页都能识别，交给 UI 决定怎么加书架 */
+    let comic = null;
+    {
+      const node = comicBestNode(root, '');
+      if (node) {
+        const urls = imgList(node.innerHTML || '', baseUrl);
+        const chars = (node.textContent || '').replace(/\s+/g, '').length;
+        if (urls.length >= 2 && chars < 1200) {
+          comic = { selector: cssPath(node), images: urls.slice(0, 20), count: urls.length };
+        }
+      }
+    }
+    /* 没有目录但整页都是图时，把这一页当成「一章」也能读 */
+    const contentOut = content || (comic ? { selector: comic.selector, paras: [], chars: 0, comic: true } : null);
     return {
-      info, toc, content,
+      info, toc, content: contentOut, comic,
       /* 搜索页用专用抽取：通用抽取拿到的是「整条结果」的锚文本，
          里面混着 cite 的域名，标题会变成 baidu.com 这种鬼东西 */
       links: serp.length >= 3 ? serp : sniffLinks(root, baseUrl),
@@ -1541,7 +1667,8 @@
 
   global.Engine = {
     normalizeSource, search, getToc, getContent,
-    htmlToParas, evalRule, first, splitRule, absUrl, selectNodes, applyPost,
+    htmlToParas, htmlToParasRich, imgList, comicBestNode,
+    evalRule, first, splitRule, absUrl, selectNodes, applyPost,
     detectPage, autoToc, autoContent, autoInfo, sniffLinks, cssPath, isChapterTitle,
     jsonQuery, jsonPathAll, contentScore, cleanParas
   };

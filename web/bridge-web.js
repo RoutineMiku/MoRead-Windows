@@ -232,11 +232,15 @@
       return v || metaProxy();
     } catch (e) { return metaProxy(); }
   }
-  function proxied(url) {
+  function proxied(url, wantBin) {
     const p = getProxy();
     if (!p) return url;
-    return p + (p.indexOf('?') < 0 ? '?' : '&') + 'url=' + encodeURIComponent(url);
+    const extra = wantBin ? '&b64=1' : '';
+    return p + (p.indexOf('?') < 0 ? '?' : '&') + 'url=' + encodeURIComponent(url) + extra;
   }
+  /* 取图请求：iOS 的本地服务把图片内容转成 JSON(base64) 回传，
+     否则代理会按文本解码，图片字节全毁（白框）。 */
+  const IMG_URL = /\.(?:jpe?g|png|gif|webp|bmp|avif)(?:[?#]|$)/i;
   function sameOrigin(url) {
     try { return new URL(url, location.href).origin === location.origin; } catch (e) { return true; }
   }
@@ -494,7 +498,17 @@
       };
       if (a.bodyB64) init.body = b64ToU8(a.bodyB64);
 
-      const res = await fetch(proxied(url), init);
+      const wantBin = !!(a.binary || IMG_URL.test(url));
+      const res = await fetch(proxied(url, wantBin && !!getProxy()), init);
+      /* 代理在 b64 模式下回一段 JSON：{status, mime, b64}，这里还原成字节 */
+      if (wantBin && getProxy()) {
+        let pack = null;
+        try { pack = await res.json(); } catch (e) { pack = null; }
+        if (pack && pack.b64 != null) {
+          const outHeaders = { 'content-type': pack.mime || 'application/octet-stream' };
+          return { status: pack.status || 200, headers: outHeaders, b64: pack.b64, url: pack.url || url };
+        }
+      }
       let bytes;
       if (res.body && res.body.getReader) {
         const reader = res.body.getReader();
@@ -594,7 +608,7 @@
 
     switch (name) {
       case 'env.info': return {
-        app: 'moread', platform: 'web', version: '0.6.3', code: 603, sdk: 0,
+        app: 'moread', platform: 'web', version: '0.6.4', code: 604, sdk: 0,
         device: (navigator.userAgent || '').slice(0, 80),
         paths: { root: '/moread', cache: '/cache', external: '' },
         webview: (navigator.userAgent || '').split(') ')[0] + ')',
