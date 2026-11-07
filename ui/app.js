@@ -116,6 +116,21 @@
     $('#modal').classList.add('open');
   }
   function closeModal() { $('#modal').classList.remove('open'); }
+  /* 二次确认：手机上一排按钮挨得近，「从头开始」点错就把阅读位置带走了。
+     返回 Promise<boolean>，调用处 await 即可。 */
+  function confirmAsk(opt) {
+    return new Promise(resolve => {
+      openModal(`<h3>${esc(opt.title || '确认')}</h3>
+        <p class="desc">${opt.text || ''}</p>
+        <div class="modal-actions">
+          <button class="btn" id="cf-no">取消</button>
+          <button class="btn ${opt.danger ? 'danger' : 'primary'}" id="cf-yes">${esc(opt.ok || '确定')}</button>
+        </div>`);
+      const done = v => { closeModal(); resolve(v); };
+      $('#cf-no').onclick = () => done(false);
+      $('#cf-yes').onclick = () => done(true);
+    });
+  }
   $('#modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') closeModal(); });
 
   /* ---------------- 存档 ---------------- */
@@ -528,7 +543,17 @@
         </div>
       </div>`;
       $('[data-open]', heroEl).onclick = () => openReader(heroBook.id);
-      $('[data-restart]', heroEl).onclick = () => openReader(heroBook.id, 0);
+      $('[data-restart]', heroEl).onclick = async () => {
+        const p2 = progressOf(heroBook.id);
+        const ok = await confirmAsk({
+          title: '从头开始阅读？',
+          text: p2
+            ? `《${esc(heroBook.name)}》会从第 1 章重新打开，当前进度（${esc(p2.title || '第 ' + ((p2.ci || 0) + 1) + ' 章')}）不会删除，随时能在目录里跳回去。`
+            : `《${esc(heroBook.name)}》会从第 1 章打开。`,
+          ok: '从头开始'
+        });
+        if (ok) openReader(heroBook.id, 0);
+      };
     }
 
     // 列表
@@ -2664,10 +2689,14 @@
   async function openReader(bookId, ci, pct) {
     const b = getBook(bookId);
     if (!b) return;
+    /* 「继续阅读」以前不带 ci，进书永远从第 1 章开始，备份里的进度等于白记。
+       没显式指定章节就接上次读到的地方。 */
+    const saved = progressOf(b.id) || {};
+    const startCi = ci == null ? (saved.ci || 0) : ci;
     resetReader();                     // 先跟上一本彻底断开
     R.book = b;
     R.chapters = b.chapters || [];
-    R.ci = clamp(ci || 0, 0, Math.max(0, (b.total || 1) - 1));
+    R.ci = clamp(startCi, 0, Math.max(0, (b.total || 1) - 1));
     R.page = 0;
     buildToc();                        // 目录同步换成这本，别留着上一本的章节
     $('#reader').classList.add('open');
@@ -2725,6 +2754,9 @@
     $('#r-pagenum').textContent = '';
     R.paras = [];
     R.lastWithin = null;
+    /* 先把书名/章节名放上去，别让用户盯着一整屏空白等网络 */
+    const earlyTitle = (b.chapters && b.chapters[R.ci] && b.chapters[R.ci].title) || '';
+    $('#r-title').innerHTML = `${esc(b.name)}${earlyTitle ? `<em>${esc(earlyTitle)}</em>` : ''}`;
 
     try {
       let title = '', paras = [];
@@ -2767,13 +2799,17 @@
           paras = cached.text;
         } else {
           loading.textContent = '加载正文…';
-          const r = await withTimeout(Engine.getContent(mo.net, src, ch.url), 30000);
+          const r = await withTimeout(Engine.getContent(mo.net, src, ch.url), 20000);
           paras = r.paras;
           if (!paras.length) throw new Error('正文为空，检查正文规则');
-          await mo.cache.set(b.id, R.ci, { title, text: paras });
+          /* 缓存写入不必挡着渲染：IndexedDB 快但也是异步的，先出字再落盘 */
+          Promise.resolve(mo.cache.set(b.id, R.ci, { title, text: paras })).catch(() => { });
         }
-        if (S.state.settings.autoCacheNext && R.ci + 1 < b.chapters.length) {
-          prefetch(b, src, R.ci + 1);
+        if (S.state.settings.autoCacheNext) {
+          /* 预取接下来两章：翻页时直接命中缓存，体感快一截 */
+          for (let k = 1; k <= 2; k++) {
+            if (R.ci + k < b.chapters.length) prefetch(b, src, R.ci + k);
+          }
         }
       }
 

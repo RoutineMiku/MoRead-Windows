@@ -245,6 +245,41 @@
       + '请到「设置 → 书源代理地址」填入你自己的代理服务。本地书导入阅读不受影响。');
   }
 
+  /* 同步请求：高级书源（jsLib + java.ajax）的规则是同步语义，必须阻塞着拿结果。
+     网页只能走同源的网关 /fetch（跨域同步 XHR 会被浏览器直接拒），
+     书源自带的请求头用 base64url(JSON) 放到 h 参数，由网关透传。 */
+  function b64url(str) {
+    const bin = unescape(encodeURIComponent(String(str)));
+    let b = '';
+    if (typeof btoa === 'function') b = btoa(bin);
+    else b = Buffer.from(bin, 'binary').toString('base64');
+    return b.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  window.__moreadHttpSync = function (url, opt) {
+    const o = opt || {};
+    const headers = o.headers || {};
+    const proxy = getProxy();
+    try {
+      if (!proxy) {
+        if (!sameOrigin(url)) return { error: netBlockedError().message };
+        const x = new XMLHttpRequest();
+        x.open(o.method || 'GET', url, false);
+        for (const k in headers) { try { x.setRequestHeader(k, headers[k]); } catch (e) { } }
+        x.send(o.body || null);
+        return { status: x.status || 0, text: x.responseText || '', headers: x.getAllResponseHeaders() || '', url };
+      }
+      let target = proxy + (proxy.indexOf('?') < 0 ? '?' : '&') + 'url=' + encodeURIComponent(url);
+      if (Object.keys(headers).length) target += '&h=' + b64url(JSON.stringify(headers));
+      const x = new XMLHttpRequest();
+      x.open('GET', target, false);
+      x.send(null);
+      if (!x.status) return { error: '连不上书源代理服务' };
+      return { status: x.status, text: x.responseText || '', headers: x.getAllResponseHeaders() || '', url };
+    } catch (e) {
+      return { error: '网络请求失败：' + (e.message || e) };
+    }
+  };
+
   /* ================================================================
    * 3. 朗读（真实 speechSynthesis，事件回传对齐 MoApp.tts 契约）
    * ================================================================ */
@@ -559,7 +594,7 @@
 
     switch (name) {
       case 'env.info': return {
-        app: 'moread', platform: 'web', version: '0.5.0', code: 500, sdk: 0,
+        app: 'moread', platform: 'web', version: '0.6.0', code: 600, sdk: 0,
         device: (navigator.userAgent || '').slice(0, 80),
         paths: { root: '/moread', cache: '/cache', external: '' },
         webview: (navigator.userAgent || '').split(') ')[0] + ')',

@@ -323,6 +323,11 @@ function decodeBody(buf, charset) {
 
 /* ------------------------------------------------------------------ 抓取 */
 
+/* 书源一次打开要连打 3~5 个请求（详情/目录/正文/预取），
+   每次都重新做 TLS 握手会白白多花 100~300ms。复用连接。 */
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 8, keepAliveMsecs: 30000 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 8, keepAliveMsecs: 30000 });
+
 function requestOnce(target, opts, depth) {
   return new Promise((resolve, reject) => {
     let u;
@@ -357,6 +362,15 @@ function requestOnce(target, opts, depth) {
       'Accept-Encoding': 'gzip, deflate, br'
     };
     if (opts.referer) headers.Referer = opts.referer;
+    /* 高级书源（jsLib + 签名）要自带请求头：只做透传，仍然受域名/内网校验约束 */
+    if (opts.headers && typeof opts.headers === 'object') {
+      for (const k of Object.keys(opts.headers)) {
+        if (!k || /^(host|content-length|connection)$/i.test(k)) continue;
+        const v = opts.headers[k];
+        if (v == null) continue;
+        headers[k] = String(v);
+      }
+    }
 
     const req = mod.request({
       protocol: u.protocol,
@@ -365,6 +379,7 @@ function requestOnce(target, opts, depth) {
       path: u.pathname + u.search,
       method: 'GET',
       headers,
+      agent: u.protocol === 'https:' ? httpsAgent : httpAgent,
       lookup: ALLOW_PRIVATE ? undefined : guardedLookup,
       timeout: TIMEOUT,
       servername: u.hostname
@@ -494,6 +509,16 @@ function cacheControl(file) {
    GitHub Pages 之类的地方时不会被注入，网页版仍保持「默认不发请求」。
    用 format=text：网页端要的是原始 HTML 字节，不是 JSON 包装。 */
 const PROXY_META = '<meta name="moread-proxy" content="/fetch?format=text">';
+
+/* 网页版把「书源要求的请求头」用 base64url(JSON) 放在 h 参数里传进来 */
+function decodeHeaderParam(v) {
+  if (!v) return {};
+  try {
+    const b = Buffer.from(String(v).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    const j = JSON.parse(b);
+    return j && typeof j === 'object' ? j : {};
+  } catch (e) { return {}; }
+}
 
 /* 内容指纹缓存：同一份文件只算一次 md5，改动（mtime/size 变化）自动重算 */
 const ASSET_HASH = new Map();
@@ -770,7 +795,8 @@ const server = http.createServer((req, res) => {
 
     requestOnce(target, {
       charset: url.searchParams.get('charset') || 'auto',
-      referer: url.searchParams.get('referer') || ''
+      referer: url.searchParams.get('referer') || '',
+      headers: decodeHeaderParam(url.searchParams.get('h') || '')
     }, MAX_REDIRECT).then(r => {
       if (raw) {
         const buf = Buffer.from(r.body, 'utf8');
