@@ -1,0 +1,10 @@
+{
+  "name": "moread-harmony",
+  "version": "1.0.0",
+  "private": true,
+  "description": "墨读 HarmonyOS 构建依赖（仅 hvigor）",
+  "dependencies": {
+    "@ohos/hvigor": "^5.3.3",
+    "@ohos/hvigor-ohos-plugin": "^5.3.3"
+  }
+}

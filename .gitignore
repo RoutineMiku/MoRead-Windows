@@ -10,6 +10,25 @@ data/
 .tmp-*/
 *.log
 
+# 跨平台打包：Electron 各平台运行时缓存（约 500MB），用时自动下载
+.cache/
+dist/_build/
+dist/_trash/
+
+# 鸿蒙：同步进来的网页版资源（由 build/sync-harmony.js 生成）
+harmony/entry/src/main/resources/rawfile/web/
+# 鸿蒙构建依赖与本机路径（hvigor 从 repo.harmonyos.com 装）
+harmony/node_modules/
+harmony/.hvigor/
+harmony/local.properties
+harmony/build/
+harmony/entry/build/
+harmony/signing/
+
+# iOS：Xcode 中间产物（MoRead/web 是提交的，Mac 上打开工程即可直接跑）
+ios/build/
+ios/DerivedData/
+
 # 本地工具链 / 测试运行目录（体积大，且只在本机有意义）
 .androidenv/
 test/.run/

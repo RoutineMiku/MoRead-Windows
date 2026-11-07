@@ -1,15 +1,27 @@
-# 墨读 · 开源阅读 Windows 版
+# 墨读 · 开源阅读
 
-![Electron](https://img.shields.io/badge/Electron-45-47848F?logo=electron) ![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows) ![License](https://img.shields.io/badge/License-MIT-green)
+![Electron](https://img.shields.io/badge/Electron-45-47848F?logo=electron) ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20Web-0078D6) ![HarmonyOS](https://img.shields.io/badge/HarmonyOS-NEXT-00A98F) ![License](https://img.shields.io/badge/License-MIT-green)
 
 > 起因： <https://gedoor.github.io/download> 只有 Android 版的「开源阅读 Legado」，没有桌面端。
-> 这个项目按 Legado 的使用习惯重写了一版 Windows 桌面端：**本地书 + Legado 书源 + 网页搜书 + 坚果云同步**，
+> 这个项目按 Legado 的使用习惯重写了一版桌面端：**本地书 + Legado 书源 + 网页搜书 + 坚果云同步**，
 > 存档格式与原版「阅读」双向兼容，可以直接导入原版「阅读」导出的 zip 备份。
+> 同一套 `ui/` 跑在七个地方：Windows / Linux / macOS / Android / 浏览器 / 鸿蒙 / iOS。
 
 **下载**（都在本仓库 [Releases](https://github.com/RoutineMiku/MoRead-Windows/releases)）：
-- Windows：`MoRead-win32-x64.zip`，解压后双击 `墨读.exe` 即可，免安装、不写注册表、数据跟着程序走
-- 安卓：[`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.1-android/MoRead-android.apk)（v0.6.1），直接安装（WebView 内置 Node 兼容层，桌面/安卓共用同一套阅读与书源逻辑）
-- 网页版（iOS / iPad / 任意浏览器）：**<https://routinemiku.github.io/MoRead-Windows/>** — 免安装、免账号，iPhone 上用 Safari 打开后「分享 → 添加到主屏幕」，就得到全屏独立图标
+
+| 平台 | 文件 | 说明 |
+| --- | --- | --- |
+| Windows x64 | `MoRead-windows-0.6.3.zip` | 解压后双击 `墨读.exe`，免安装、不写注册表 |
+| Linux x64 / arm64 | `MoRead-linux-x64-0.6.3.tar.gz` / `-arm64` | 解压 → `./启动墨读.sh`；`./install.sh` 装进应用菜单 |
+| macOS Intel / Apple Silicon | `MoRead-mac-x64-0.6.3.zip` / `-arm64` | 未签名，首次需右键打开或 `xattr -cr`（见 `docs/platforms.md`） |
+| Android 7+ | [`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3-android/MoRead-android.apk) | 直接安装，WebView 内置 Node 兼容层 |
+| 鸿蒙 4.x 及以下 | 同上 APK | 系统自带安卓兼容，直接装 |
+| 鸿蒙 NEXT (5.0) | `MoRead-harmony-0.6.3.hap` | ArkWeb 壳；未签名包自己用 DevEco / 自己的证书签，也提供 SDK 测试 CA 自签版，见 `harmony/README.md` |
+| iOS 15+ | `ios/` Xcode 工程 → `MoRead-0.6.3-unsigned.ipa` | 需 Mac 编译；内置本地服务与抓书代理，自己用 Apple ID 签，见 `ios/README.md` |
+| 网页版 / iPad PWA | **<https://routinemiku.github.io/MoRead-Windows/>** | 免安装免账号，Safari「添加到主屏幕」即得全屏图标 |
+
+各平台怎么打、有哪些已知限制：**[docs/platforms.md](docs/platforms.md)**
+
 
 ![书架](docs/screenshots/shot_shelf.png)
 

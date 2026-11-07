@@ -1,0 +1,40 @@
+# XcodeGen 配置：万一手写的 .xcodeproj 在你这版 Xcode 上打不开，
+# 或者你想要一个干净的新工程，就这样重建：
+#
+#   brew install xcodegen
+#   cd ios && xcodegen generate
+#
+name: MoRead
+options:
+  bundleIdPrefix: com.routinemiku
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+targets:
+  MoRead:
+    type: application
+    platform: iOS
+    sources:
+      - path: MoRead
+        excludes:
+          - "Info.plist"
+          - "web"
+      # web 必须是「蓝色文件夹」引用：整个目录原样进 .app，
+      # LocalServer 才能用 Bundle.main.url(forResource: "web") 找到它。
+      - path: MoRead/web
+        type: folder
+    settings:
+      base:
+        INFOPLIST_FILE: MoRead/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        PRODUCT_BUNDLE_IDENTIFIER: com.routinemiku.moread
+        PRODUCT_NAME: MoRead
+        MARKETING_VERSION: "0.6.3"
+        CURRENT_PROJECT_VERSION: "603"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_USER_SCRIPT_SANDBOXING: NO

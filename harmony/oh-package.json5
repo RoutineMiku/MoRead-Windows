@@ -1,0 +1,10 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "moread",
+  "version": "1.0.0",
+  "description": "墨读 · HarmonyOS 壳（ArkWeb 加载同一套 ui/）",
+  "main": "",
+  "author": "routinemiku",
+  "license": "MIT",
+  "dependencies": {}
+}
