@@ -413,6 +413,10 @@
       },
       icon: (s.bookSourceName || s.name || '源').slice(0, 1),
       comment: s.bookSourceComment || '',
+      /* Legado 备份里的 customOrder 是用户手动排的书源顺序。以前归一化时直接丢掉，
+         恢复后书源页和换源列表的顺序就再也回不到备份里的样子。 */
+      order: Number.isFinite(+s.customOrder) ? +s.customOrder
+        : (Number.isFinite(+s.order) ? +s.order : 0),
       createdAt: Date.now()
     };
   }

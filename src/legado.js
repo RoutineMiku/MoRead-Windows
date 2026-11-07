@@ -158,7 +158,10 @@ function rawBooksFromLegado(arr) {
       name,
       author: pickStr(b, 'author') || '佚名',
       bookUrl: pickStr(b, 'bookUrl'),
+      /* originRaw 保留备份里的原始书源地址；origin 是归一化后用来匹配的键。
+         书要记下「原本用的哪个源」，换源时才排得出备份里的顺序。 */
       origin: normalizeUrl(pickStr(b, 'origin')),
+      originRaw: pickStr(b, 'origin'),
       originName: pickStr(b, 'originName'),
       intro: pickStr(b, 'intro'),
       cover: pickStr(b, 'coverUrl'),
