@@ -164,11 +164,28 @@ function rawBooksFromLegado(arr) {
       originRaw: pickStr(b, 'origin'),
       originName: pickStr(b, 'originName'),
       intro: pickStr(b, 'intro'),
-      cover: pickStr(b, 'coverUrl'),
+      cover: pickStr(b, 'coverUrl') || pickStr(b, 'customCoverUrl'),
+      coverCustom: pickStr(b, 'customCoverUrl'),
       group: Number(b.group != null ? b.group : 0) || 0,
+      /* 目录页：原版单独存了这一项。飞速这类站的书架地址是 /txtdown/xxx.html（下载页），
+         上面只有十几条「最新章节」，真正目录在 tocUrl 指的那个页面。 */
+      tocUrl: pickStr(b, 'tocUrl'),
       total: Number(pickStr(b, 'chapterListSize') || pickStr(b, 'totalChapterNum') || 0) || 0,
+      latestChapterTitle: pickStr(b, 'latestChapterTitle'),
+      latestChapterTime: Number(pickStr(b, 'latestChapterTime') || 0) || 0,
+      lastCheckTime: Number(pickStr(b, 'lastCheckTime') || 0) || 0,
+      wordCount: pickStr(b, 'wordCount'),
+      /* 原版 Book.type：0 文本 / 1 音频 / 2 图片(漫画) / 3 文件，有的分支还带位标记，
+         这里只当参考，真正判漫画看目录页与正文图片数 */
+      bookType: Number(b.type != null ? b.type : 0) || 0,
+      kind: pickStr(b, 'kind'),
+      canUpdate: b.canUpdate !== false,
+      variable: pickStr(b, 'variable'),
+      readConfig: b.readConfig && typeof b.readConfig === 'object' ? b.readConfig : null,
+      order: Number(b.order != null ? b.order : 0) || 0,
       durChapterIndex: Number(pickStr(b, 'durChapterIndex') || 0) || 0,
       durChapterTitle: pickStr(b, 'durChapterTitle'),
+      durChapterPos: Number(pickStr(b, 'durChapterPos') || 0) || 0,
       durChapterTime: Number(pickStr(b, 'durChapterTime') || 0) || 0
     });
   }

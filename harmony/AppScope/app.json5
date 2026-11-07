@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "cn.moread.harmony",
     "vendor": "routinemiku",
-    "versionCode": 604,
-    "versionName": "0.6.4",
+    "versionCode": 607,
+    "versionName": "0.6.7",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }

@@ -9,6 +9,11 @@ const { URL } = require('url');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
+/* 连接复用：不 keep-alive 的话，每抓一章都要重新 TCP + TLS 握手（200~400ms），
+   一章一章读下来全是这个开销。16 个长连接足够覆盖「预取 2 章 + 漫画并发 6 图」。 */
+const httpAgent = new http.Agent({ keepAlive: true, keepAliveMsecs: 15000, maxSockets: 16 });
+const httpsAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 15000, maxSockets: 16 });
+
 function decompress(buf, encoding) {
   try {
     if (encoding === 'gzip') return zlib.gunzipSync(buf);
@@ -66,7 +71,11 @@ function request(url, opts, redirects = 0) {
     const req = mod.request({
       protocol: u.protocol, hostname: u.hostname, port: u.port,
       path: u.pathname + u.search, method: opts.method || 'GET', headers,
+      agent: opts.agent || (u.protocol === 'https:' ? httpsAgent : httpAgent),
       timeout: opts.timeout || 18000,
+      /* 中文站给的头极不规范（七猫的响应头里有裸空格），Node 默认解析器直接拒收整条响应。
+         打开宽松解析器，这类站才能抓 —— 我们只读 HTML，不依赖严格的头校验。 */
+      insecureHTTPParser: true,
       // 小说站证书过期/自签名极常见，允许降级（见 fetchText 的重试）
       rejectUnauthorized: opts.insecure ? false : undefined
     }, res => {
@@ -99,15 +108,27 @@ function request(url, opts, redirects = 0) {
 
 /** 证书类错误：很多小说站证书过期/域名不匹配，重试时放宽校验 */
 const CERT_ERR = /CERT_HAS_EXPIRED|CERT_NOT_YET_VALID|DEPTH_ZERO_SELF_SIGNED|SELF_SIGNED_CERT|UNABLE_TO_VERIFY_LEAF|UNABLE_TO_GET_ISSUER|ERR_TLS_CERT_ALTNAME|EPROTO|ERR_SSL/i;
+/** 长连接被对方提前关掉：GET 重发一次就好（服务端关空闲连接很常见） */
+const RETRY_ERR = /ECONNRESET|EPIPE|ECONNABORTED|socket hang up/i;
+
+async function withRetry(fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!RETRY_ERR.test(String((e && e.code) || '') + ' ' + String((e && e.message) || ''))) throw e;
+    return fn();
+  }
+}
 
 async function fetchText(url, opts = {}) {
   const t0 = Date.now();
   let res;
+  const run = o => withRetry(() => request(url, o));
   try {
-    res = await request(url, opts);
+    res = await run(opts);
   } catch (e) {
     if (!opts.insecure && CERT_ERR.test(String(e && (e.code || e.message)))) {
-      res = await request(url, Object.assign({}, opts, { insecure: true }));
+      res = await run(Object.assign({}, opts, { insecure: true }));
     } else {
       throw e;
     }

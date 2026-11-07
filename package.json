@@ -1,7 +1,7 @@
 {
   "name": "moread",
   "productName": "墨读",
-  "version": "0.6.4",
+  "version": "0.6.7",
   "description": "墨读 · 本地优先的阅读器（Windows / Linux / macOS / Android / 网页 / 鸿蒙 / iOS）",
   "main": "src/main.js",
   "author": "routinemiku",
