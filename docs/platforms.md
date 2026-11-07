@@ -33,7 +33,7 @@ iOS 不在上面这五列里：它是 WKWebView 壳，复用同一份 `bridge-we
 出完包统一发到 GitHub Releases（一条命令，可重复运行，同名同尺寸的会跳过）：
 
 ```bash
-GH_TOKEN=xxx npm run release:publish -- v0.6.3
+GH_TOKEN=xxx npm run release:publish -- v0.6.8
 ```
 
 它会建 tag（指向 main 的 HEAD）+ Release，把 `dist/` 里九个产物逐个上传，
@@ -58,7 +58,7 @@ Electron 的运行时就是预编译好的压缩包，换平台等于换一个�
 ### Linux
 
 ```bash
-tar -xzf MoRead-linux-x64-0.6.3.tar.gz
+tar -xzf MoRead-linux-x64-0.6.8.tar.gz
 cd MoRead-linux-x64
 ./启动墨读.sh        # 或 ./install.sh 装进应用菜单
 ```
@@ -73,7 +73,7 @@ cd MoRead-linux-x64
 ### macOS
 
 ```bash
-unzip MoRead-mac-arm64-0.6.3.zip
+unzip MoRead-mac-arm64-0.6.8.zip
 mv MoRead.app /Applications/
 xattr -cr /Applications/MoRead.app     # 第一次必须做：包是在 Windows 上打的，没签名
 ```

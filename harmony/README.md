@@ -4,7 +4,7 @@
 `harmony/` 里只有「怎么把网页装进鸿蒙应用」这一层。
 
 **这个工程是真的能编出 `.hap` 的** —— 在 Windows 上用 OpenHarmony SDK + hvigor 跑通过，
-产物 `dist/MoRead-harmony-0.6.3.hap`（未签名）与 `MoRead-harmony-0.6.3-signed.hap`（自签，verify 通过）。
+产物 `dist/MoRead-harmony-0.6.8.hap`（未签名）与 `MoRead-harmony-0.6.8-signed.hap`（自签，verify 通过）。
 
 ## 一、一条命令出包
 
@@ -54,7 +54,7 @@ DevEco 会把 `signingConfigs` 写回 `harmony/build-profile.json5`，
 profile + 证书链，再 `sign-app`，最后跑 `verify-app` 验证（不通过就不输出）。
 
 ```bash
-hdc install dist/MoRead-harmony-0.6.3-signed.hap
+hdc install dist/MoRead-harmony-0.6.8-signed.hap
 ```
 
 ### C. 你自己已有的证书
