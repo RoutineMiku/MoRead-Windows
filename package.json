@@ -2,7 +2,7 @@
   "name": "moread",
   "productName": "墨读",
   "version": "0.6.3",
-  "description": "墨读 · 本地优先的阅读器（Windows / Linux / macOS / Android / 网页 / 鸿蒙）",
+  "description": "墨读 · 本地优先的阅读器（Windows / Linux / macOS / Android / 网页 / 鸿蒙 / iOS）",
   "main": "src/main.js",
   "author": "routinemiku",
   "license": "MIT",
@@ -21,7 +21,8 @@
     "web:deploy": "node build/gen-web.js && node web/deploy-pages.js",
     "harmony": "node build/gen-web.js && node build/sync-harmony.js",
     "harmony:pack": "node build/build-hap.js",
-    "ios": "node build/gen-web.js && node build/sync-ios.js"
+    "ios": "node build/gen-web.js && node build/sync-ios.js",
+    "release:publish": "node build/release-upload.js"
   },
   "devDependencies": {
     "electron": "^45.0.0",
