@@ -55,7 +55,8 @@ TEAM_ID=ABCDE12345 ./scripts/build-ipa.sh signed   # 用你的证书签好
 打印 `Info.plist` 的版本号、数一下 `.app/web/` 里的文件数，缺东西直接失败）。
 
 拿到未签名 ipa 后按下一节第 2 行做（Sideloadly / AltStore / 爱思助手，Windows 就行）。
-已发布的成品：<https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.3-ios>
+已发布的成品：<https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.7>
+（`MoRead-0.6.7-unsigned.ipa` 就挂在各版本的 Release 里，跟 Windows / Android 的包同一条发布）
 
 **不要用的路子**：网上那些「在线 IPA 生成 / 免签安装」网站，要么只接受你自己上传的
 `Payload`（等于还是得有 Mac 先编出来），要么让你上传 Apple ID 换签名（账号风险），
@@ -67,7 +68,7 @@ TEAM_ID=ABCDE12345 ./scripts/build-ipa.sh signed   # 用你的证书签好
 
 | 方式 | 需要 | 有效期 | 做法 |
 |---|---|---|---|
-| **现成未签名 ipa** | 一台 Windows/Mac | 7 天 | 下 [Releases 里的 ipa](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.3-ios) → Sideloadly 填入 Apple ID → 装 |
+| **现成未签名 ipa** | 一台 Windows/Mac | 7 天 | 下 [最新 Release 里的 ipa](https://github.com/RoutineMiku/MoRead-Windows/releases/latest) → Sideloadly 填入 Apple ID → 装 |
 | **GitHub Actions 自己出** | 一个 GitHub 账号 | 同上 | Actions 里跑 `ios-ipa.yml`，Artifacts 拿 ipa（见「二·五」） |
 | **Xcode 直连真机** | Mac + 任意 Apple ID | 7 天，到期重连一次 | Xcode 里填 Team（免费账号就是个人 Apple ID）→ Run |
 | **未签名 ipa + 重签工具** | Windows 也行 | 7 天 | 拿 `MoRead-<版本>-unsigned.ipa`，用 **Sideloadly / AltStore / 爱思助手** 载入，输自己的 Apple ID 签 |
