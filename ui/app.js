@@ -1378,7 +1378,23 @@
         ruleSearch: {}, ruleBookInfo: {}, ruleToc: b.webRule?.toc || {}, ruleContent: b.webRule?.content || {}
       };
     }
-    return sourceById(b.sourceId);
+    const direct = sourceById(b.sourceId);
+    if (direct) return direct;
+    /* 从原版备份恢复的书可能记的是旧书源 id：源被改名、重建或换了 id 时，
+       按备份里的 origin（书源地址）+ originName 再找一次，别让书直接变「缺书源」。 */
+    const nu = u => String(u || '').trim().replace(/\/+$/, '').toLowerCase()
+      .replace(/^https?:\/\//, '').replace(/^www\./, '');
+    const key = nu(b.origin || b.originRaw);
+    if (key) {
+      const hit = S.state.sources.find(s => nu(s.url) === key && s.name === b.originName)
+        || S.state.sources.find(s => nu(s.url) === key);
+      if (hit) return hit;
+    }
+    if (b.originName) {
+      const hit = S.state.sources.find(s => s.name === b.originName);
+      if (hit) return hit;
+    }
+    return null;
   }
 
   /* ---------------- 书源 ---------------- */
@@ -2047,8 +2063,8 @@
             <select class="w-engine" id="s-shelf-sort">${SHELF_SORTS.map(o => `<option value="${o.k}" ${shelfSortKey() === o.k ? 'selected' : ''}>${o.name}</option>`).join('')}</select></div>
           <div class="row"><div class="rl">封面大小<small>书架上一本书占多大</small></div>
             <div class="seg" id="s-shelf-size">${SHELF_SIZES.map(o => `<button data-v="${o.k}" class="${shelfSizeKey() === o.k ? 'on' : ''}">${o.name}</button>`).join('')}</div></div>
-          <div class="row"><div class="rl">换源时搜索的书源数<small>越多越容易找到同名书，但更慢</small></div>
-            <div class="seg" id="s-swlimit">${[12, 24, 48].map(n => `<button data-v="${n}" class="${(s.switchLimit || 24) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
+          <div class="row"><div class="rl">换源时搜索的书源数<small>越多越容易找到同名书，但更慢；书源上千时会自动提高到 48</small></div>
+            <div class="seg" id="s-swlimit">${[24, 48, 96].map(n => `<button data-v="${n}" class="${([24, 48, 96].includes(s.switchLimit) ? s.switchLimit : 24) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
           <div class="row"><div class="rl">数据目录<small>${esc(onDeviceStore() ? (S.info.dataRoot || S.info.paths.root) : S.info.paths.root)}</small></div>
             ${IS_ANDROID ? '' : '<button class="link" id="open-dir">打开</button>'}</div>
           ${S.info.platform === 'web' ? `<div class="row"><div class="rl">书源代理地址<small>网页版默认不发起任何网络请求（数据不出设备）。填入你自部署的代理服务后可用在线书源与搜书；留空只能读本地书</small></div>
@@ -2246,31 +2262,76 @@
     if (mode === 'replace') {
       st.sources = []; st.books = []; st.bookmarks = []; st.progress = {}; st.history = [];
     }
-    // 1) 书源（两三千年源要用索引，逐个 find 会 O(n²) 卡死）
+    /* 源名规范化：去空白、去装饰符号，只用于兜底模糊匹配。
+       精确匹配仍用原名，避免把「🌸 二二中文」和「🍊 22中文」当成一个源。 */
+    const normName = n => String(n || '').replace(/\s+/g, '').toLowerCase();
+    const bareName = n => normName(n).replace(/[^0-9a-z\u4e00-\u9fff]/g, '');
+    const srcKey = (u, n) => normUrl(u) + '\u0001' + normName(n);
+
+    // 1) 书源：按「站点 URL + 源名」保真去重（几千源要用索引，不能用 find）
+    /* 原版备份里同一个域名常挂好几个规则不同的源（用户这份就有 408 个重复 URL）。
+       以前只按 URL 去重，同站不同规则的源被随手丢掉，书也绑不回自己那个源。 */
     let srcAdded = 0, srcUpdated = 0;
-    const byUrl = new Map();
-    for (const s of st.sources) {
-      const k = normUrl(s.url);
-      if (k && !byUrl.has(k)) byUrl.set(k, s);
-    }
+    const byKey = new Map(), byUrl = new Map(), byName = new Map();
+    const indexSource = s => {
+      const u = normUrl(s.url), n = normName(s.name);
+      const k = srcKey(u, n);
+      if (!byKey.has(k)) byKey.set(k, s);
+      if (u) { if (!byUrl.has(u)) byUrl.set(u, []); byUrl.get(u).push(s); }
+      if (n) { if (!byName.has(n)) byName.set(n, []); byName.get(n).push(s); }
+    };
+    st.sources.forEach(indexSource);
     for (const raw of parts.sources || []) {
       const s = Engine.normalizeSource(raw);
-      const k = normUrl(s.url);
-      const old = k ? byUrl.get(k) : null;
+      const old = byKey.get(srcKey(s.url, s.name));
       if (old) { Object.assign(old, s, { id: old.id, enabled: old.enabled }); srcUpdated++; }
-      else { st.sources.push(s); srcAdded++; if (k) byUrl.set(k, s); }
+      else { st.sources.push(s); srcAdded++; indexSource(s); }
     }
-    // 2) 书架
+    /* 按备份里的 customOrder 还原书源顺序，换源列表也跟着这个顺序走。
+       没有 order 的源（自己新建的）排到最后，保持原有相对顺序。 */
+    if ((parts.sources || []).length) {
+      const ord = s => Number.isFinite(s.order) ? s.order : Number.MAX_SAFE_INTEGER;
+      st.sources.sort((a, b) => ord(a) - ord(b));
+    }
+
+    // 2) 书架：优先绑回备份里记的那个源
+    const findSource = raw => {
+      const u = normUrl(raw.origin || raw.originRaw);
+      const n = normName(raw.originName);
+      const exact = byKey.get(srcKey(u, n));
+      if (exact) return exact;
+      const sameUrl = byUrl.get(u) || [];
+      if (n) {
+        const bn = bareName(n);
+        const close = sameUrl.find(s => normName(s.name) === n)
+          || sameUrl.find(s => bareName(s.name) === bn)
+          || (byName.get(n) || []).find(s => normUrl(s.url) === u)
+          || (byName.get(n) || [])[0];
+        if (close) return close;
+      }
+      /* 站点换过域名时，备份里的 bookUrl 常指向旧域名，也拿它试一次 */
+      const bu = normUrl(String(raw.bookUrl || '').replace(/^(https?:\/\/[^\/]+).*$/i, '$1'));
+      if (bu && bu !== u && byUrl.has(bu)) return byUrl.get(bu)[0];
+      return sameUrl[0] || null;
+    };
     let added = 0, updated = 0, noSource = 0;
     for (const raw of parts.books || []) {
-      const src = byUrl.get(normUrl(raw.origin))
-        || st.sources.find(s => s.name && s.name === raw.originName)
-        || null;
+      const src = findSource(raw);
       if (!src) noSource++;
-      const exist = st.books.find(b => b.bookUrl === raw.bookUrl) || st.books.find(b => b.name === raw.name && b.author === raw.author);
+      /* 换过源、或目录解析改过书名/作者后，bookUrl 和作者都可能跟备份不一样；
+         同名书基本就是同一本，再加一层兜底，避免重新导入时多出一本重复书。 */
+      const exist = st.books.find(b => b.bookUrl && b.bookUrl === raw.bookUrl)
+        || st.books.find(b => b.name === raw.name && b.author === raw.author)
+        || st.books.find(b => b.name === raw.name);
       if (exist) {
         if (!exist.chapters || !exist.chapters.length) exist.total = raw.total || exist.total;
         exist.updatedAt = Date.now();
+        /* 重新导入同一份备份时顺手把以前绑错的书源纠正回来；
+           用户手工换过源的书不动，尊重他的选择。 */
+        if (src && !exist.manualSource) { exist.sourceId = src.id; exist.sourceName = src.name; }
+        exist.origin = raw.origin || exist.origin || '';
+        exist.originRaw = raw.originRaw || exist.originRaw || '';
+        exist.originName = raw.originName || exist.originName || '';
         updated++;
         const p = st.progress[exist.id] || {};
         if ((raw.durChapterIndex || 0) >= (p.ci || 0)) {
@@ -2282,6 +2343,8 @@
       st.books.push({
         id, name: raw.name, author: raw.author || '佚名', kind: 'online',
         sourceId: src ? src.id : '', sourceName: src ? src.name : (raw.originName || '（缺书源）'),
+        /* 记下备份里的原始书源：换源时把它排在最前，源被改名/重建也能找回来 */
+        origin: raw.origin || '', originRaw: raw.originRaw || '', originName: raw.originName || '',
         bookUrl: raw.bookUrl, intro: raw.intro || '', cover: raw.cover || '',
         total: raw.total || 0, chapters: [], groupId: raw.groupName ? ensureGroup(raw.groupName) : 'g_default',
         createdAt: Date.now(), updatedAt: Date.now()
@@ -2571,13 +2634,42 @@
     if (next) next.title = s.pageMode === 'paged' ? '下一页（→ / PageDown / 空格）' : '下一章';
   }
 
+  /* 换书 / 退出阅读器时彻底复位。
+     以前只把 R.book 置空：退出再点另一本时，新章还在网络上飞，屏幕上仍是
+     上一本的正文和标题；要是上一本的慢请求后回来，还会直接把旧内容糊到新书上。
+     这里一次性作废在途加载、清空残留 DOM 与全部阅读状态。 */
+  function resetReader() {
+    R.loadSeq++;                       // 让所有在途 loadChapter / 续章请求过期
+    stopTTS();
+    clearInterval(R.timer); R.timer = null;
+    clearTimeout(R.barsT); R.barsT = null;
+    clearTimeout(R.saveT); R.saveT = null;
+    R.book = null; R.ci = 0; R.chapters = []; R.paras = []; R.title = '';
+    R.pages = [[]]; R.page = 0; R.chars = 0; R.ttsIdx = 0;
+    R.buf = null; R.bufTail = -1; R.bufLock = false; R.bufFail = {};
+    R.lastWithin = null;
+    const page = $('#r-page'); if (page) page.innerHTML = '';
+    const stage = $('#r-stage'); if (stage) stage.scrollTop = 0;
+    for (const sel of ['#r-title', '#r-info', '#r-pagenum', '#r-loading']) {
+      const el = $(sel); if (el) el.textContent = '';
+    }
+    /* 目录面板只清列表内容，不能整块 innerHTML='' —— #toc-list / #toc-count
+       是它的子元素，清掉之后 buildToc() 会拿不到节点 */
+    const tocList = $('#toc-list'); if (tocList) tocList.innerHTML = '';
+    const tocCount = $('#toc-count'); if (tocCount) tocCount.textContent = '';
+    $('#r-toc-panel').classList.remove('open');
+    $('#toc-mask').classList.remove('on');
+  }
+
   async function openReader(bookId, ci, pct) {
     const b = getBook(bookId);
     if (!b) return;
+    resetReader();                     // 先跟上一本彻底断开
     R.book = b;
     R.chapters = b.chapters || [];
     R.ci = clamp(ci || 0, 0, Math.max(0, (b.total || 1) - 1));
     R.page = 0;
+    buildToc();                        // 目录同步换成这本，别留着上一本的章节
     $('#reader').classList.add('open');
     /* 手机进书即沉浸：顶/底栏滑出屏幕，点中间唤出（几秒不用自动再藏） */
     if (isAndroidApp()) $('#reader').classList.add('bars-off');
@@ -2599,14 +2691,8 @@
       const pct = R.lastWithin != null ? R.lastWithin : (max > 10 ? stage.scrollTop / max : 1);
       setProgress(b.id, R.ci, R.title, pct);
     }
-    stopTTS();
-    clearInterval(R.timer);
-    R.timer = null;
-    clearTimeout(R.barsT); R.barsT = null;
+    resetReader();
     $('#reader').classList.remove('open', 'bars-off');
-    $('#r-toc-panel').classList.remove('open');
-    $('#toc-mask').classList.remove('on');
-    R.book = null;
     if (mo.win.isFull) mo.win.fullscreen();
     save(true);
     /* 无论从哪个视图（搜索/书签/历史）进的阅读器，返回都回到书架 */
@@ -2627,8 +2713,11 @@
     if (!b) return;
     /* 并发导航互斥：快速连按「上一章」时，慢的那次可能后完成，把旧章节的标题/
        内容配新章节的 ci 渲染出来（章节和 data-ci 就错位了）。后启动的调用递增
-       代数，先启动的完成后发现代数对不上就整个丢弃。 */
+       代数，先启动的完成后发现代数对不上就整个丢弃。
+       换书时再多一道 bookId 校验：代数相同也不代表还是同一本书。 */
     const seq = ++R.loadSeq;
+    const bookId = b.id;
+    const stale = () => seq !== R.loadSeq || !R.book || R.book.id !== bookId;
     if (R.tts) stopTTS();
     R.ci = clamp(ci, 0, Math.max(0, (b.total || 1) - 1));
     const loading = $('#r-loading');
@@ -2659,6 +2748,16 @@
           R.chapters = b.chapters;
           buildToc();
           if (!b.chapters.length) throw new Error('目录为空，检查书源的目录规则');
+          /* 备份里的阅读进度按原书源的章节数记，换源或站点改版后新目录可能短很多，
+             直接沿用旧 ci 就是「章节不存在」→ 一进书就是错误页。
+             先按备份记的章节标题定位，找不到就落到最后一章。 */
+          if (R.ci >= b.chapters.length) {
+            const p = progressOf(b.id) || {};
+            const want = normChapTitle(p.title || b.durChapterTitle || '');
+            let k = want ? b.chapters.findIndex(c => normChapTitle(c.title) === want) : -1;
+            if (k < 0) k = b.chapters.length - 1;
+            R.ci = clamp(k, 0, b.chapters.length - 1);
+          }
         }
         const ch = b.chapters[R.ci];
         if (!ch) throw new Error('章节不存在');
@@ -2679,11 +2778,11 @@
       }
 
       /* 等待期间用户可能又点了别的章节：过期的这次直接丢弃，不渲染不写状态 */
-      if (seq !== R.loadSeq) return;
+      if (stale()) return;
       /* 本章带 EPUB 图片时先把图加载完再渲染：分页测量依赖图片真实尺寸 */
       if (paras.some(isImgPara)) {
         await preloadImgs(paras);
-        if (seq !== R.loadSeq) return;
+        if (stale()) return;
       }
       R.title = title;
       R.paras = paras;
@@ -2705,13 +2804,16 @@
       $('#r-info').textContent = `本章 ${R.chars.toLocaleString()} 字`;
       loading.textContent = '';
       /* 章节很短不满一屏时永远不产生 scroll 事件，加载完主动续一次 */
-      if (seq === R.loadSeq) maybeContinueScroll();
+      if (!stale()) maybeContinueScroll();
     } catch (e) {
-      if (seq !== R.loadSeq) return;      // 过期的失败也别把新章节的页面糊成错误页
+      if (stale()) return;      // 过期的失败也别把新章节的页面糊成错误页
       const msg = e.message || String(e);
       const canSwitch = b.kind !== 'local';
+      const fromBackup = !!(b.origin || b.originRaw);
       $('#r-page').innerHTML = `<div class="err">加载失败：${esc(msg)}<br>
-        <span style="font-size:12px;opacity:.7">${canSwitch ? '这个书源可能已失效，先点「重试」再抓一次；还不行就换一个源继续读' : '检查「书源」里的规则，或重新导入这本书'}</span>
+        <span style="font-size:12px;opacity:.7">${!canSwitch ? '检查「书源」里的规则，或重新导入这本书'
+          : fromBackup ? '这本书来自备份：备份只存书源地址和目录页，原站点可能已换域名或失效。先点「重试」，不行就「换源继续读」，备份原源会排在最前'
+            : '这个书源可能已失效，先点「重试」再抓一次；还不行就换一个源继续读'}</span>
         <div class="err-act">
           <button class="btn" id="err-retry">重试</button>
           ${canSwitch ? '<button class="btn primary" id="err-switch">换源继续读</button>' : ''}
@@ -3459,24 +3561,43 @@
     return p;
   }
 
-  async function switchSource() {
+  async function switchSource(kwOverride) {
     const b = R.book || (S.state.books.find(x => x.id === S.switchBookId));
     if (!b) return;
-    /* 检测为「无用」的源永远跳过：换源本来就慢，不要把时间浪费在打不开的站上 */
     const enabled = S.state.sources.filter(s => s.enabled && s.searchUrl);
     if (!enabled.length) { toast('没有启用的网络书源，先去「书源」里启用'); return; }
+    /* 从原版备份恢复后动辄两千多个源，只搜 24 个等于把备份里排在后面的源全丢掉，
+       「以前能看的那个源」往往就找不到。书源多时自动把上限提上来。 */
+    let cap = clamp(S.state.settings.switchLimit || 24, 4, 120);
+    if (enabled.length > 200) cap = Math.max(cap, 48);
     const alive = enabled.filter(s => s.quality !== 'dead');
-    const good = alive.filter(s => s.quality === 'great' || s.quality === 'ok');
-    /* 有足够多检测过的好源就只搜好源；没检测过就退回全部启用的 */
-    const pool = good.length >= 6 ? good : (alive.length ? alive : enabled);
-    const cap = clamp(S.state.settings.switchLimit || 24, 4, 120);
-    const srcs = pickSearchSources(pool, cap);
+    const pool = alive.length ? alive : enabled;
+    const originSrc = srcForBook(b);      // 备份里这本书原本用的源
+    const used = new Set(S.state.books.map(x => x.sourceId).filter(Boolean));
+    /* 优先级：本书原源 → 书架在用的源 → 检测过的优质源 → 其余按备份里的顺序。
+       第一屏就是「备份原源 + 以前能看的源」，列表顺序也跟着备份走。 */
+    const prio = s => {
+      if (originSrc && s.id === originSrc.id) return 0;
+      if (used.has(s.id)) return 1;
+      if (s.quality === 'great' || s.quality === 'ok') return 2;
+      if (s.quality === 'poor') return 4;
+      return 3;
+    };
+    const poolIdx = new Map(pool.map((s, i) => [s, i]));
+    const cmp = (a, c) => (prio(a) - prio(c)) || (poolIdx.get(a) - poolIdx.get(c));
+    const srcs = pool.slice().sort(cmp).slice(0, cap);
     const srcRank = new Map(srcs.map((s, i) => [s.id, i]));
     const skipped = enabled.length - srcs.length;
     const conc = isAndroidApp() ? 5 : 8;
+    const kw = (typeof kwOverride === 'string' && kwOverride.trim())
+      ? kwOverride.trim() : String(b.name || '').trim();
 
     openModal(`<h3>换源 · ${esc(b.name)}</h3>
-      <p class="desc">在 ${srcs.length} 个书源里找同名书（共启用 ${enabled.length} 个，优先检测过的优质源${skipped > 0 ? `，本次不搜 ${skipped} 个` : ''}）。<br>当前读到：${esc(R.title || '未开始')}（第 ${(R.ci || 0) + 1} 章）</p>
+      <p class="desc">在 ${srcs.length} 个书源里找同名书（共启用 ${enabled.length} 个，优先备份原源与书架在用的源${skipped > 0 ? `，本次不搜 ${skipped} 个` : ''}）。<br>当前读到：${esc(R.title || '未开始')}（第 ${(R.ci || 0) + 1} 章）</p>
+      <div style="display:flex;gap:8px;align-items:center;margin:10px 0">
+        <input id="sw-kw" type="text" value="${esc(kw)}" placeholder="搜索关键词" style="flex:1;min-width:0;padding:8px 10px;border:1px solid #c9ced8;border-radius:8px;background:#fff;color:#222;font-size:14px" />
+        <button class="btn sm" id="sw-research">换个词搜</button>
+      </div>
       <div class="sw-prog"><span id="sw-prog-t">准备搜索…</span><button class="link" id="sw-stop">停止</button></div>
       <div class="sw-list searching" id="sw-list"><div class="hint" id="sw-hint">搜索中…</div></div>
       <div class="modal-actions"><button class="btn" onclick="window.__closeModal()">关闭</button></div>`, true);
@@ -3484,25 +3605,26 @@
     const box = $('#sw-list');
     const hits = [];
     const keys = new Set();
-    const kw = b.name;
     const t0 = Date.now();
     let cursor = 0, done = 0, stopped = false, finished = false;
 
     const rowHtml = r => {
       const cur = r.sourceId === b.sourceId;
+      const isOrigin = !!(originSrc && r.sourceId === originSrc.id);
       const q = (sourceById(r.sourceId) || {}).quality;
       const key = r.sourceId + '|' + r.bookUrl;
       return `<div class="sw-item ${cur ? 'cur' : ''}" data-key="${esc(key)}">
         <div class="sw-ico">${esc((r.sourceName || '源')[0])}</div>
         <div class="sw-body">
-          <div class="sw-t">${esc(r.name)}<span class="chip">${esc(r.sourceName || '')}</span>${q ? `<span class="chip q-${q}">${Q_NAME[q] || ''}</span>` : ''}${cur ? '<span class="chip on">当前源</span>' : ''}</div>
+          <div class="sw-t">${esc(r.name)}<span class="chip">${esc(r.sourceName || '')}</span>${q ? `<span class="chip q-${q}">${Q_NAME[q] || ''}</span>` : ''}${isOrigin ? '<span class="chip on">备份原源</span>' : (cur ? '<span class="chip on">当前源</span>' : '')}</div>
           <div class="sw-s">${esc(r.author || '佚名')}${r.lastChapter ? ' · ' + esc(r.lastChapter) : ''}</div>
         </div>
-        <button class="btn sm ${cur ? '' : 'primary'}" data-sw="${esc(key)}" ${cur ? 'disabled' : ''}>${cur ? '当前' : '切到这本'}</button>
+        <button class="btn sm ${cur ? '' : 'primary'}" data-sw="${esc(key)}">${cur ? '重试此源' : '切到这本'}</button>
       </div>`;
     };
     /* 搜索过程中只往列表尾部追加，绝不整体重排 —— 这就是「列表不停跳动」的根因。
-       全部搜完后按 质量 → 书源优先级 排一次，用户点的时候顺序已经稳定。 */
+       全部搜完后按「备份书源顺序（原源在最前）→ 质量」排一次：
+       换源列表的顺序要跟备份里的一致，不能让检测结果把它打乱。 */
     const appendHits = list => {
       const h = $('#sw-hint');
       if (h) h.remove();
@@ -3513,8 +3635,8 @@
       return q === 'great' ? 0 : q === 'ok' ? 1 : q === 'poor' ? 3 : q ? 4 : 2;
     };
     const sortHits = () => hits.sort((x, y) =>
+      ((srcRank.get(x.sourceId) ?? 9999) - (srcRank.get(y.sourceId) ?? 9999)) ||
       (qrank(x) - qrank(y)) ||
-      ((srcRank.get(x.sourceId) ?? 999) - (srcRank.get(y.sourceId) ?? 999)) ||
       String(x.name).localeCompare(String(y.name)));
     const progress = () => {
       const el = $('#sw-prog-t');
@@ -3522,7 +3644,7 @@
       const sec = Math.max(0, Math.round((Date.now() - t0) / 1000));
       const left = done > 0 ? Math.max(0, Math.round(sec / done * (srcs.length - done))) : 0;
       el.textContent = finished
-        ? `已搜 ${done}/${srcs.length} 个源，找到 ${hits.length} 本 · 用时 ${sec}s${hits.length >= 12 ? ' · 够用了，提前结束' : ''}${hits.length ? '' : '（换个关键词或去网页里手动找）'}`
+        ? `已搜 ${done}/${srcs.length} 个源，找到 ${hits.length} 本 · 用时 ${sec}s${hits.length >= 20 ? ' · 够用了，提前结束' : ''}${hits.length ? '' : '（换个关键词或去网页里手动找）'}`
         : `已搜 ${done}/${srcs.length} · 找到 ${hits.length} 本 · 约剩 ${left}s`;
     };
 
@@ -3530,6 +3652,16 @@
       stopped = true;
       const el = $('#sw-prog-t');
       if (el) el.textContent = '正在停止…';
+    };
+    /* 备份里的书名常被拼上角色名（「XX王浩苏映雪」），拿全名去搜很多站都搜不到。
+       允许用户改关键词重搜，这是「以前能看的书现在换源找不到」最常见的解法。 */
+    $('#sw-research').onclick = () => {
+      const nk = (($('#sw-kw') || {}).value || '').trim();
+      if (!nk) return toast('关键词不能为空');
+      if (nk === kw) return toast('关键词没变，直接用下面的列表就行');
+      stopped = true;
+      closeModal();
+      setTimeout(() => switchSource(nk), 0);
     };
     box.addEventListener('click', e => {
       const btn = e.target.closest('[data-sw]');
@@ -3541,7 +3673,7 @@
 
     const worker = async () => {
       while (true) {
-        if (stopped || hits.length >= 12) return;
+        if (stopped || hits.length >= 20) return;
         /* 弹窗关掉（或已经切到别的源）就别再搜了：安卓上继续跑只会拖慢后面的章节加载 */
         if (!document.body.contains(box) || !$('#modal').classList.contains('open')) return;
         const i = cursor++;
@@ -3607,6 +3739,8 @@
     if (idx < 0) idx = toc.chapters.findIndex(c => normChapTitle(c.title).includes(curNorm) && curNorm.length > 1);
     if (idx < 0) idx = clamp(R.ci, 0, toc.chapters.length - 1);
 
+    /* 标记为用户手工选的源：以后再导入备份时不要把他选的覆盖回备份里的旧源 */
+    b.manualSource = true;
     b.sourceId = r.sourceId;
     b.sourceName = src.name;
     b.bookUrl = r.bookUrl;
