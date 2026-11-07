@@ -112,27 +112,46 @@ async function uploadAsset(releaseId, f) {
   return false;
 }
 
-const BODY = `同一份 \`ui/\`，七个平台。版本 **${V}**（Android versionCode ${VCODE}）。
+/* 每个平台在说明里怎么写 —— 顺序有讲究：signed.hap 要排在通用 harmony 前面 */
+const USAGE = [
+  [/^MoRead-windows-/, 'Windows', 'Windows x64', '解压，双击 `墨读.exe`。免安装、不写注册表，数据跟着程序走'],
+  [/^MoRead-android-/, 'Android', 'Android 7+', '直接安装（与桌面共用同一套阅读与书源逻辑）'],
+  [/^MoRead-linux-x64-/, 'Linux x64', 'Linux x64', '`tar xzf …` 后跑 `./moread`，或 `./install.sh` 装桌面图标'],
+  [/^MoRead-linux-arm64-/, 'Linux arm64', 'Linux arm64', '同上，树莓派 / ARM 小主机'],
+  [/^MoRead-mac-x64-/, 'macOS Intel', 'macOS Intel', '解压得到 `MoRead.app`。**未签名**：首次打开要右键 → 打开，或 `xattr -dr com.apple.quarantine MoRead.app`'],
+  [/^MoRead-mac-arm64-/, 'macOS Silicon', 'macOS Apple Silicon', '同上'],
+  [/^MoRead-harmony-.*-signed\.hap$/, '鸿蒙自签', '鸿蒙（自签）', 'SDK 自带 OpenHarmony 测试 CA 签的，开发板 / 模拟器可 `hdc install`'],
+  [/^MoRead-harmony-/, '鸿蒙', '鸿蒙 NEXT', '未签名，用 DevEco「自动签名」或自己的证书签'],
+  [/^MoRead-.*-unsigned\.ipa$/, 'iOS', 'iOS 15+', '未签名，Sideloadly / AltStore 填自己 Apple ID 重签（免费账号 7 天到期）'],
+];
+const usageOf = name => USAGE.find(([re]) => re.test(name));
+
+/* 发布说明只列这次真的传上去的文件 —— 以前是硬编码七个平台，
+   Linux/macOS 没出包也写进去，用户点进去找不到文件。 */
+const rows = files.map(f => {
+  const u = usageOf(f.name);
+  return u ? `| ${u[2]} | \`${f.name}\` | ${u[3]} |` : null;
+}).filter(Boolean);
+const plats = [...new Set(files.map(f => (usageOf(f.name) || [])[1]).filter(Boolean))];
+const NOTES = (() => {
+  const i = process.argv.indexOf('--notes');
+  if (i < 0) return '';
+  const p = process.argv[i + 1];
+  return p && fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() + '\n\n' : '';
+})();
+
+const BODY = `${NOTES}同一份 \`ui/\`，一套代码跑遍各端。版本 **${V}**（Android versionCode ${VCODE}）。
 
 | 平台 | 文件 | 怎么用 |
 | --- | --- | --- |
-| Windows x64 | \`MoRead-windows-${V}.zip\` | 解压，双击 \`墨读.exe\`。免安装、不写注册表，数据跟着程序走 |
-| Android 7+ | \`MoRead-android-${V}.apk\` | 直接安装（与桌面共用同一套阅读与书源逻辑） |
-| Linux x64 | \`MoRead-linux-x64-${V}.tar.gz\` | \`tar xzf …\` 后跑 \`./moread\`，或 \`./install.sh\` 装桌面图标 |
-| Linux arm64 | \`MoRead-linux-arm64-${V}.tar.gz\` | 同上，树莓派 / ARM 小主机 |
-| macOS Intel | \`MoRead-mac-x64-${V}.zip\` | 解压得到 \`MoRead.app\`。**未签名**：首次打开要右键 → 打开，或 \`xattr -dr com.apple.quarantine MoRead.app\` |
-| macOS Apple Silicon | \`MoRead-mac-arm64-${V}.zip\` | 同上 |
-| 鸿蒙 NEXT | \`MoRead-harmony-${V}.hap\` | 未签名，用 DevEco「自动签名」或自己的证书签 |
-| 鸿蒙（自签） | \`MoRead-harmony-${V}-signed.hap\` | SDK 自带 OpenHarmony 测试 CA 签的，开发板 / 模拟器可 \`hdc install\` |
-| iOS 15+ | \`MoRead-${V}-unsigned.ipa\` | 未签名，Sideloadly 填自己 Apple ID 重签（免费账号 7 天） |
+${rows.join('\n')}
 | 网页 / iPad PWA | — | <https://routinemiku.github.io/MoRead-Windows/> |
 
-iOS 另有单独说明：见 [\`v0.6.3-ios\`](https://github.com/${REPO}/releases/tag/v0.6.3-ios)。
-
 ### 说明
-- **Linux / macOS / 鸿蒙 / iOS 未做真机验证**（手上只有 Windows 和安卓设备）。编译、签名、包结构都验过，实机反馈欢迎开 issue。
+- 只有 Windows、Android 是每期实测的；**Linux / macOS / 鸿蒙 / iOS 未做真机验证**（手上没这些设备）。编译、签名、包结构都验过，实机反馈欢迎开 issue。
 - Linux 包内 \`moread\` 的可执行位已写成 0755（Windows 打 tar 会按 NTFS ACL 写成 0666，脚本里重算了 tar 头校验和）；macOS 包保留了 framework 的 14 条符号链接（先解压再压缩会把 \`Versions/Current\` 变成 1 字节文件）。
 - 鸿蒙零售机只认华为签发证书，唯一免费路径是 DevEco 自动签名（绑自己账号 + 设备 UDID）。
+- iOS 的 ipa 由 GitHub Actions 的 macOS runner 编译（\`.github/workflows/ios-ipa.yml\`），未签名，需要自己重签。
 `;
 
 (async () => {
@@ -152,15 +171,16 @@ iOS 另有单独说明：见 [\`v0.6.3-ios\`](https://github.com/${REPO}/release
     console.log(`tag ${TAG} 已存在`);
   }
 
-  /* 2. release（不存在才建） */
+  /* 2. release（不存在才建；存在但说明过时就用新的覆盖） */
   r = await api(`/repos/${REPO}/releases/tags/${TAG}`);
   let rel = r.status === 200 ? r.json : null;
+  const TITLE = `墨读 ${V} · ${plats.length ? plats.join(' / ') : '全平台'}`;
   if (!rel) {
     r = await api(`/repos/${REPO}/releases`, {
       method: 'POST',
       body: JSON.stringify({
         tag_name: TAG,
-        name: `墨读 ${V} · Windows / Linux / macOS / Android / 鸿蒙 / iOS`,
+        name: TITLE,
         body: BODY,
         draft: false,
         prerelease: false,
@@ -171,6 +191,14 @@ iOS 另有单独说明：见 [\`v0.6.3-ios\`](https://github.com/${REPO}/release
     console.log('release 已创建:', rel.html_url);
   } else {
     console.log('release 已存在:', rel.html_url);
+    if ((rel.body || '').trim() !== BODY.trim() || rel.name !== TITLE) {
+      r = await api(`/repos/${REPO}/releases/${rel.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ body: BODY, name: TITLE }),
+      });
+      if (r.status === 200) { rel = r.json; console.log('  说明已更新（只列这次真实存在的产物）'); }
+      else console.log('  说明更新失败', r.status, String(r.text).slice(0, 120));
+    }
   }
 
   /* 3. 逐个上传，已存在同尺寸的跳过 */
