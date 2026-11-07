@@ -121,10 +121,19 @@ input,select,textarea{font-family:inherit;font-size:13px;color:inherit;}
 .hero .prog{height:4px;border-radius:4px;background:rgba(255,255,255,.16);overflow:hidden;max-width:400px;}
 .hero .prog i{display:block;height:100%;background:linear-gradient(90deg,#7fb0ff,#c9ddff);border-radius:4px;}
 .hero .prog-txt{font-size:11px;color:#9db6db;margin-top:6px;}
-.hero-actions{display:flex;gap:8px;margin-top:12px;}
+.hero-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+.hero-actions .btn{flex:0 0 auto;}
 .hero .btn{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.18);color:#fff;box-shadow:none;height:32px;}
 .hero .btn:hover{background:rgba(255,255,255,.24);}
 .hero .btn.primary{background:#fff;color:#16233a;border-color:#fff;}
+/* 手机窄屏：卡片左右各 32px 边距 + 22px 内边距 + 96px 封面，留给按钮的空间只剩 160 出头，
+   两个按钮不换行就被 overflow:hidden 裁掉一半（「从头开始」只剩一半）。收窄边距、缩小封面，
+   按钮允许换行，宁可占两行也不截断。 */
+html[data-layout="portrait"] .hero{margin:2px 14px 6px;padding:16px;gap:14px;align-items:flex-start;}
+html[data-layout="portrait"] .hero .cover{width:80px;flex:0 0 80px;}
+html[data-layout="portrait"] .hero h2{font-size:19px;letter-spacing:.5px;}
+html[data-layout="portrait"] .hero .meta{margin-bottom:10px;}
+html[data-layout="portrait"] .hero-actions .btn{height:34px;padding:0 14px;}
 
 .shelf-head{display:flex;align-items:center;gap:12px;margin:20px 32px 12px;}
 .shelf-head .line{flex:1;height:1px;background:var(--line);}
@@ -837,8 +846,15 @@ html[data-layout] #reader.bars-off .page{
 html[data-layout="portrait"] .page{padding:26px 18px 96px;max-width:100%;}
 html[data-layout="portrait"] .page h2{font-size:22px;margin:8px 0 24px;}
 html[data-layout="portrait"] .rb-row{gap:7px;}
-html[data-layout="portrait"] .rb-row2{margin-top:7px;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;}
-html[data-layout="portrait"] .rb-btn{height:36px;flex:0 0 auto;}
+/* 竖屏第二排按钮本来就多（字号/模式/字体/四套主题/朗读/设置），
+   以前用 overflow-x:auto + nowrap 硬塞，.rb-group 还能被压缩，
+   结果按钮文字被下一组盖住、底下多出一条横向滚动条。
+   现在允许换行、各组禁止收缩，宁可排两行也不重叠。 */
+html[data-layout="portrait"] .rb-row2{margin-top:7px;overflow:visible;flex-wrap:wrap;row-gap:7px;padding-bottom:0;}
+html[data-layout="portrait"] .rb-row2 .rb-group,
+html[data-layout="portrait"] .rb-row2 .swatches{flex:0 0 auto;}
+html[data-layout="portrait"] .rb-row2 .rb-spacer{flex:1 1 0;min-width:0;}
+html[data-layout="portrait"] .rb-btn{height:36px;flex:0 0 auto;white-space:nowrap;}
 html[data-layout="portrait"] .toc{width:84%;top:calc(54px + var(--sa-top));box-shadow:20px 0 40px -22px rgba(0,0,0,.6);}
 html[data-layout="landscape"] .page{padding:34px 46px 100px;}
 html[data-layout="landscape"] .toc{width:320px;}

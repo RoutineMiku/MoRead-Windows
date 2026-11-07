@@ -267,20 +267,499 @@
     return (node.textContent || '').replace(/\u00a0/g, ' ').trim();
   }
 
+  /* ---------- JS 书源支持（jsLib + java API） ----------
+   * Legado 的高级书源会把协议写进 jsLib，规则只写一句 @js:xxx(java, source, ...)：
+   *   - 规则本身要能调用 jsLib 里声明的函数（以前引擎只 eval 表达式，函数全 undefined）
+   *   - 里面还会用 java.ajax / java.connect 发请求、用 AES + MD5 + SHA-256 解密
+   *   - 有的直接 new Packages.java.io.ByteArrayOutputStream()，要提供最小 Java 垫片
+   * 这些都在主线程同步执行：书源规则本来就是「取到数据马上算」的同步语义，
+   * 改成异步会把 search/toc/content 整条链路都要重写。
+   */
+  const HEX = '0123456789abcdef';
+  function toHex(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += HEX[(bytes[i] >> 4) & 15] + HEX[bytes[i] & 15];
+    return s;
+  }
+  function fromHex(s) {
+    const t = String(s || '').replace(/[^0-9a-f]/gi, '');
+    const out = new Uint8Array(t.length >> 1);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(t.substr(i * 2, 2), 16);
+    return out;
+  }
+  function utf8Bytes(str) {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(String(str));
+    const esc = unescape(encodeURIComponent(String(str)));
+    const out = new Uint8Array(esc.length);
+    for (let i = 0; i < esc.length; i++) out[i] = esc.charCodeAt(i);
+    return out;
+  }
+  function utf8String(bytes) {
+    if (typeof TextDecoder !== 'undefined') return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    try { return decodeURIComponent(escape(s)); } catch (e) { return s; }
+  }
+  function bytesToStr(bytes, charset) {
+    const cs = String(charset || 'utf-8').toUpperCase();
+    if (cs === 'US-ASCII' || cs === 'ASCII' || cs === 'ISO-8859-1' || cs === 'LATIN1') {
+      let s = '';
+      for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i] & 255);
+      return s;
+    }
+    return utf8String(bytes);
+  }
+  function strToBytes(str, charset) {
+    const cs = String(charset || 'utf-8').toUpperCase();
+    if (cs === 'US-ASCII' || cs === 'ASCII' || cs === 'ISO-8859-1' || cs === 'LATIN1') {
+      const s = String(str);
+      const out = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 255;
+      return out;
+    }
+    return utf8Bytes(str);
+  }
+  function b64Bytes(s) {
+    const t = String(s || '').replace(/[\s\r\n]/g, '').replace(/-/g, '+').replace(/_/g, '/');
+    if (typeof atob === 'function') {
+      const bin = atob(t + '='.repeat((4 - t.length % 4) % 4));
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+    return new Uint8Array(Buffer.from(t, 'base64'));
+  }
+  function bytesB64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    if (typeof btoa === 'function') return btoa(bin);
+    return Buffer.from(bytes).toString('base64');
+  }
+
+  /* --- MD5（书源签名常用） --- */
+  function md5Hex(input) {
+    const bytes = typeof input === 'string' ? utf8Bytes(input) : input;
+    const len = bytes.length;
+    const nBlocks = ((len + 8) >> 6) + 1;
+    const words = new Int32Array(nBlocks * 16);
+    for (let i = 0; i < len; i++) words[i >> 2] |= bytes[i] << ((i % 4) * 8);
+    words[len >> 2] |= 0x80 << ((len % 4) * 8);
+    words[nBlocks * 16 - 2] = len * 8;
+    const S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+      5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+      4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+      6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21];
+    const K = new Int32Array(64);
+    for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) | 0;
+    let a0 = 0x67452301, b0 = 0xefcdab89 | 0, c0 = 0x98badcfe | 0, d0 = 0x10325476;
+    const rotl = (x, c) => (x << c) | (x >>> (32 - c));
+    for (let blk = 0; blk < nBlocks; blk++) {
+      let A = a0, B = b0, C = c0, D = d0;
+      for (let i = 0; i < 64; i++) {
+        let F, g;
+        if (i < 16) { F = (B & C) | (~B & D); g = i; }
+        else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+        else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+        else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+        F = (F + A + K[i] + words[blk * 16 + g]) | 0;
+        A = D; D = C; C = B;
+        B = (B + rotl(F, S[i])) | 0;
+      }
+      a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+    }
+    const out = new Uint8Array(16);
+    [a0, b0, c0, d0].forEach((v, i) => {
+      out[i * 4] = v & 255; out[i * 4 + 1] = (v >> 8) & 255;
+      out[i * 4 + 2] = (v >> 16) & 255; out[i * 4 + 3] = (v >>> 24) & 255;
+    });
+    return toHex(out);
+  }
+
+  /* --- SHA-256（动态信封的密钥派生用） --- */
+  const SHA_K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+  function sha256Hex(input) {
+    const bytes = typeof input === 'string' ? utf8Bytes(input) : input;
+    const len = bytes.length;
+    const nBlocks = ((len + 9 + 63) >> 6);
+    const buf = new Uint8Array(nBlocks * 64);
+    buf.set(bytes);
+    buf[len] = 0x80;
+    const bitLen = len * 8;
+    buf[buf.length - 4] = (bitLen >>> 24) & 255;
+    buf[buf.length - 3] = (bitLen >>> 16) & 255;
+    buf[buf.length - 2] = (bitLen >>> 8) & 255;
+    buf[buf.length - 1] = bitLen & 255;
+    const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    const w = new Int32Array(64);
+    const rr = (x, n) => (x >>> n) | (x << (32 - n));
+    for (let blk = 0; blk < nBlocks; blk++) {
+      for (let i = 0; i < 16; i++) {
+        const p = blk * 64 + i * 4;
+        w[i] = (buf[p] << 24) | (buf[p + 1] << 16) | (buf[p + 2] << 8) | buf[p + 3];
+      }
+      for (let i = 16; i < 64; i++) {
+        const s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+        const s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+      let [a, b, c, d, e, f, g, h] = H;
+      for (let i = 0; i < 64; i++) {
+        const S1 = rr(e, 6) ^ rr(e, 11) ^ rr(e, 25);
+        const ch = (e & f) ^ (~e & g);
+        const t1 = (h + S1 + ch + SHA_K[i] + w[i]) | 0;
+        const S0 = rr(a, 2) ^ rr(a, 13) ^ rr(a, 22);
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + maj) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0;
+        d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    const out = new Uint8Array(32);
+    H.forEach((v, i) => {
+      out[i * 4] = (v >>> 24) & 255; out[i * 4 + 1] = (v >>> 16) & 255;
+      out[i * 4 + 2] = (v >>> 8) & 255; out[i * 4 + 3] = v & 255;
+    });
+    return toHex(out);
+  }
+
+  /* --- AES（CBC + PKCS5/7），128/192/256 位密钥 --- */
+  const SBOX = new Uint8Array(256), INV_SBOX = new Uint8Array(256);
+  (function buildSbox() {
+    const mul = (a, b) => {
+      let r = 0;
+      while (b) { if (b & 1) r ^= a; a = ((a << 1) ^ ((a & 0x80) ? 0x1b : 0)) & 255; b >>= 1; }
+      return r & 255;
+    };
+    const inv = a => {           // GF(2^8) 乘法逆元：a^254
+      if (!a) return 0;
+      let r = 1, b = a, e = 254;
+      while (e) { if (e & 1) r = mul(r, b); b = mul(b, b); e >>= 1; }
+      return r;
+    };
+    const rotl8 = (v, n) => ((v << n) | (v >>> (8 - n))) & 255;
+    for (let i = 0; i < 256; i++) {
+      const b = inv(i);
+      const s = (b ^ rotl8(b, 1) ^ rotl8(b, 2) ^ rotl8(b, 3) ^ rotl8(b, 4) ^ 0x63) & 255;
+      SBOX[i] = s;
+      INV_SBOX[s] = i;
+    }
+  })();
+  const RCON = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36, 0x6c, 0xd8];
+  function xtime(a) { return ((a << 1) ^ ((a & 0x80) ? 0x1b : 0)) & 255; }
+  function gmul(a, b) {
+    let r = 0;
+    while (b) { if (b & 1) r ^= a; a = xtime(a); b >>= 1; }
+    return r & 255;
+  }
+  function expandKey(key) {
+    const nk = key.length >> 2, nr = nk + 6;
+    const w = [];
+    for (let i = 0; i < nk; i++) w[i] = [key[i * 4], key[i * 4 + 1], key[i * 4 + 2], key[i * 4 + 3]];
+    for (let i = nk; i < 4 * (nr + 1); i++) {
+      let t = w[i - 1].slice();
+      if (i % nk === 0) {
+        t = [SBOX[t[1]] ^ RCON[i / nk], SBOX[t[2]], SBOX[t[3]], SBOX[t[0]]];
+      } else if (nk > 6 && i % nk === 4) {
+        t = t.map(v => SBOX[v]);
+      }
+      w[i] = w[i - nk].map((v, j) => (v ^ t[j]) & 255);
+    }
+    return { w, nr };
+  }
+  function addKey(state, w, r) {
+    for (let c = 0; c < 4; c++) for (let rr = 0; rr < 4; rr++) state[c * 4 + rr] ^= w[r * 4 + c][rr];
+  }
+  function subBytes(s, box) { for (let i = 0; i < 16; i++) s[i] = box[s[i]]; }
+  function shiftRows(s, inv) {
+    const t = s.slice();
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) {
+        const nc = inv ? (c - r + 4) % 4 : (c + r) % 4;
+        s[c * 4 + r] = t[nc * 4 + r];
+      }
+    }
+  }
+  function mixColumns(s) {
+    for (let c = 0; c < 4; c++) {
+      const a0 = s[c * 4], a1 = s[c * 4 + 1], a2 = s[c * 4 + 2], a3 = s[c * 4 + 3];
+      s[c * 4] = gmul(a0, 2) ^ gmul(a1, 3) ^ a2 ^ a3;
+      s[c * 4 + 1] = a0 ^ gmul(a1, 2) ^ gmul(a2, 3) ^ a3;
+      s[c * 4 + 2] = a0 ^ a1 ^ gmul(a2, 2) ^ gmul(a3, 3);
+      s[c * 4 + 3] = gmul(a0, 3) ^ a1 ^ a2 ^ gmul(a3, 2);
+    }
+  }
+  function invMixColumns(s) {
+    for (let c = 0; c < 4; c++) {
+      const a0 = s[c * 4], a1 = s[c * 4 + 1], a2 = s[c * 4 + 2], a3 = s[c * 4 + 3];
+      s[c * 4] = gmul(a0, 14) ^ gmul(a1, 11) ^ gmul(a2, 13) ^ gmul(a3, 9);
+      s[c * 4 + 1] = gmul(a0, 9) ^ gmul(a1, 14) ^ gmul(a2, 11) ^ gmul(a3, 13);
+      s[c * 4 + 2] = gmul(a0, 13) ^ gmul(a1, 9) ^ gmul(a2, 14) ^ gmul(a3, 11);
+      s[c * 4 + 3] = gmul(a0, 11) ^ gmul(a1, 13) ^ gmul(a2, 9) ^ gmul(a3, 14);
+    }
+  }
+  function encBlock(s, w, nr) {
+    addKey(s, w, 0);
+    /* 最后一轮不做 MixColumns，否则和 InvCipher 对不上（往返会得到乱码） */
+    for (let r = 1; r < nr; r++) {
+      subBytes(s, SBOX); shiftRows(s, false); mixColumns(s); addKey(s, w, r);
+    }
+    subBytes(s, SBOX); shiftRows(s, false); addKey(s, w, nr);
+  }
+  function decBlock(s, w, nr) {
+    addKey(s, w, nr);
+    for (let r = nr - 1; r >= 1; r--) {
+      shiftRows(s, true); subBytes(s, INV_SBOX); addKey(s, w, r); invMixColumns(s);
+    }
+    shiftRows(s, true); subBytes(s, INV_SBOX); addKey(s, w, 0);
+  }
+  function aesCbc(key, iv, data, encrypt) {
+    const { w, nr } = expandKey(key);
+    let input = Uint8Array.from(data);
+    if (encrypt) {
+      const pad = 16 - (input.length % 16);
+      const padded = new Uint8Array(input.length + pad);
+      padded.set(input); padded.fill(pad, input.length);
+      input = padded;
+    } else if (input.length % 16) {
+      throw new Error('AES 密文长度必须是 16 的倍数');
+    }
+    const out = new Uint8Array(input.length);
+    let prev = Uint8Array.from(iv).slice(0, 16);
+    for (let off = 0; off < input.length; off += 16) {
+      const block = Array.from(input.slice(off, off + 16));
+      if (encrypt) {
+        for (let i = 0; i < 16; i++) block[i] ^= prev[i];
+        encBlock(block, w, nr);
+        prev = Uint8Array.from(block);
+      } else {
+        const cipher = input.slice(off, off + 16);
+        decBlock(block, w, nr);
+        for (let i = 0; i < 16; i++) block[i] ^= prev[i];
+        prev = cipher;
+      }
+      out.set(block, off);
+    }
+    if (!encrypt) {
+      const pad = out[out.length - 1];
+      if (pad >= 1 && pad <= 16) return out.slice(0, out.length - pad);
+    }
+    return out;
+  }
+
+  /* --- Java 垫片：jsLib 会直接 new 这两个类 --- */
+  class ByteArrayOutputStream {
+    constructor() { this.buf = []; }
+    write(b) { if (typeof b === 'number') this.buf.push(b & 255); else if (b && b.length) for (const x of b) this.buf.push(x & 255); }
+    toByteArray() { return Uint8Array.from(this.buf); }
+    size() { return this.buf.length; }
+    toString() { return bytesToStr(Uint8Array.from(this.buf)); }
+  }
+  class ArrayList {
+    constructor() { this.items = []; }
+    add(v) { this.items.push(v); return true; }
+    get(i) { return this.items[i]; }
+    size() { return this.items.length; }
+    toArray() { return this.items.slice(); }
+    isEmpty() { return this.items.length === 0; }
+  }
+  const Packages = {
+    java: {
+      io: { ByteArrayOutputStream },
+      util: { ArrayList },
+      lang: { String: { valueOf: v => String(v) } }
+    }
+  };
+
+  /* --- 书源变量（jsLib 里 source.get / source.put，用来缓存域名、正则表） --- */
+  const srcVarCache = new Map();
+  function loadSrcVars() {
+    if (srcVarCache.has('__all')) return srcVarCache.get('__all');
+    let m = {};
+    try {
+      const raw = window.localStorage && window.localStorage.getItem('moread.srcvars');
+      if (raw) m = JSON.parse(raw) || {};
+    } catch (e) { m = {}; }
+    srcVarCache.set('__all', m);
+    return m;
+  }
+  let srcVarTimer = null;
+  function sourceProxy(src) {
+    if (!src) return { get: () => '', put: () => { }, url: '', name: '' };
+    if (src.__proxy) return src.__proxy;
+    const key = src.id || src.url || 'src';
+    const all = loadSrcVars();
+    const bag = all[key] || (all[key] = {});
+    const proxy = {
+      url: src.url || '', name: src.name || '', bookSourceUrl: src.url || '',
+      get(k) { return bag[k] == null ? '' : bag[k]; },
+      put(k, v) {
+        bag[String(k)] = String(v);
+        clearTimeout(srcVarTimer);
+        srcVarTimer = setTimeout(() => {
+          try { window.localStorage && window.localStorage.setItem('moread.srcvars', JSON.stringify(all)); } catch (e) { }
+        }, 300);
+      }
+    };
+    try { Object.defineProperty(src, '__proxy', { value: proxy, enumerable: false }); } catch (e) { }
+    return proxy;
+  }
+
+  /* --- 同步 HTTP：网页走网关 /fetch（同源，不受 CORS 限制），安卓/Electron 走桥 --- */
+  function syncHttp(url, opt) {
+    const o = opt || {};
+    if (typeof window.__moreadHttpSync === 'function') {
+      const r = window.__moreadHttpSync(url, { method: o.method || 'GET', headers: o.headers || {}, body: o.body || null, timeout: o.timeout || 20000 });
+      if (r && typeof r.text === 'string') return r;
+      if (r && r.error) throw new Error(r.error);
+    }
+    if (typeof XMLHttpRequest === 'undefined') throw new Error('当前环境不支持同步请求');
+    const xhr = new XMLHttpRequest();
+    xhr.open(o.method || 'GET', url, false);
+    for (const k in (o.headers || {})) {
+      try { xhr.setRequestHeader(k, o.headers[k]); } catch (e) { }
+    }
+    try { xhr.send(o.body || null); } catch (e) { throw new Error('网络请求失败：' + (e.message || e)); }
+    if (!xhr.status) throw new Error('网络不可达或请求被拦');
+    return { status: xhr.status, text: xhr.responseText || '', headers: xhr.getAllResponseHeaders() || '', url };
+  }
+  function headerArg(h) {
+    if (!h) return {};
+    if (typeof h === 'string') {
+      try { const j = JSON.parse(h); return j && typeof j === 'object' ? j : {}; } catch (e) { return {}; }
+    }
+    return h;
+  }
+  function respObj(r) {
+    return {
+      code: () => r.status,
+      body: () => r.text,
+      headers: () => r.headers,
+      message: () => '',
+      toString: () => r.text
+    };
+  }
+
+  /* --- java 对象：按书源复用 --- */
+  const javaCache = new WeakMap();
+  function javaFor(src) {
+    if (!src) return baseJava();
+    if (javaCache.has(src)) return javaCache.get(src);
+    const j = baseJava(src);
+    javaCache.set(src, j);
+    return j;
+  }
+  function baseJava(src) {
+    return {
+      ajax(url, headers) {
+        const r = syncHttp(url, { headers: headerArg(headers) });
+        if (r.status >= 400) return '';
+        return r.text;
+      },
+      connect(url, headers, body) {
+        const method = body == null ? 'GET' : 'POST';
+        return respObj(syncHttp(url, { method, headers: headerArg(headers), body: typeof body === 'string' ? body : null }));
+      },
+      get(url, headers) { return respObj(syncHttp(url, { headers: headerArg(headers) })); },
+      post(url, body, headers) {
+        return respObj(syncHttp(url, { method: 'POST', headers: headerArg(headers), body: typeof body === 'string' ? body : null }));
+      },
+      md5Encode(s) { return md5Hex(String(s == null ? '' : s)); },
+      digestHex(s, alg) {
+        const a = String(alg || 'SHA-256').toUpperCase().replace('-', '');
+        if (a === 'MD5') return md5Hex(String(s == null ? '' : s));
+        return sha256Hex(String(s == null ? '' : s));
+      },
+      base64DecodeToByteArray(s) { return b64Bytes(s); },
+      base64Decode(s) { return bytesToStr(b64Bytes(s)); },
+      base64Encode(s) { return bytesB64(typeof s === 'string' ? utf8Bytes(s) : s); },
+      hexDecodeToByteArray(s) { return fromHex(s); },
+      hexEncodeToString(s) { return toHex(typeof s === 'string' ? utf8Bytes(s) : s); },
+      strToBytes(s, cs) { return strToBytes(s, cs); },
+      bytesToStr(b, cs) { return bytesToStr(b, cs); },
+      createSymmetricCrypto(alg, key, iv) {
+        const name = String(alg || 'AES/CBC/PKCS5Padding').toUpperCase();
+        const k = Uint8Array.from(key), v = Uint8Array.from(iv || new Uint8Array(16));
+        return {
+          encrypt(data) { return aesCbc(k, v, Uint8Array.from(data), true); },
+          decrypt(data) { return aesCbc(k, v, Uint8Array.from(data), false); }
+        };
+      },
+      encodeURI(s) { return encodeURIComponent(String(s)); },
+      log(s) { try { console.log('[书源]', s); } catch (e) { } },
+      toast(s) { try { console.log('[书源]', s); } catch (e) { } },
+      longToast(s) { try { console.log('[书源]', s); } catch (e) { } }
+    };
+  }
+
+  /* --- jsLib 编译缓存：一个书源只编译一次 --- */
+  const jsLibCache = new Map();
+  function jsLibFactory(src) {
+    const lib = String(src.jsLib || '');
+    const key = (src.id || '') + ':' + lib.length + ':' + (lib.slice(0, 40)) + ':' + (lib.slice(-40));
+    if (jsLibCache.has(key)) return jsLibCache.get(key);
+    let factory = null;
+    try {
+      factory = new Function('java', 'source', 'scope', 'Packages',
+        lib + '\n;return function(expr){ with(scope){ return eval(expr); } };');
+    } catch (e) {
+      try { console.warn('[书源] jsLib 编译失败：' + (e.message || e)); } catch (e2) { }
+      factory = null;
+    }
+    jsLibCache.set(key, factory);
+    return factory;
+  }
+
   /* ---------- JS 求值 ---------- */
   function runJs(expr, vars) {
+    const v = vars || {};
+    const src = v.src || null;
     try {
       const scope = {
-        encodeURIComponent, decodeURIComponent, JSON, Math, String, Number, Array, Object,
-        baseUrl: vars.baseUrl || '', result: vars.result == null ? '' : vars.result, html: vars.html || ''
+        encodeURIComponent, decodeURIComponent, encodeURI, JSON, Math, String, Number, Array, Object,
+        Date, parseInt, parseFloat, isNaN, Packages, java: javaFor(src), source: sourceProxy(src),
+        baseUrl: v.baseUrl || '', result: v.result == null ? (v.html || '') : v.result, html: v.html || '',
+        key: v.key == null ? '' : v.key, title: v.title || '', book: v.book || null,
+        cookie: '', cache: new Map()
       };
-      const fn = new Function('baseUrl', 'result', 'html', 'scope',
+      /* 带 jsLib 的书源：先执行整段库代码，再在同一闭包里 eval 规则 */
+      if (src && src.jsLib) {
+        const factory = jsLibFactory(src);
+        if (factory) return factory(scope.java, scope.source, scope, Packages)(expr);
+      }
+      const fn = new Function('java', 'source', 'scope', 'baseUrl', 'result', 'html', 'key',
         'with(scope){ return (' + expr + '); }');
-      const out = fn(vars.baseUrl || '', vars.result == null ? '' : vars.result, vars.html || '', scope);
-      return out;
+      return fn(scope.java, scope.source, scope, scope.baseUrl, scope.result, scope.html, scope.key);
     } catch (e) {
       return undefined;
     }
+  }
+
+  /* 对象字段规则：JSON 书源的 name / author / title 这类简单键，
+     以前只当 CSS 选择器处理，命不中就空 —— 现在直接读对象字段。 */
+  function jsonField(obj, rule) {
+    const k = String(rule || '').trim();
+    if (!k || /[#@>:\s\[\]]/.test(k)) return undefined;
+    if (obj && typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, k)) return obj[k];
+    if (/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)+$/.test(k)) {
+      let cur = obj;
+      for (const part of k.split('.')) {
+        if (cur == null || typeof cur !== 'object') return undefined;
+        cur = cur[part];
+      }
+      return cur;
+    }
+    return undefined;
   }
 
   /* ---------- 主求值 ---------- */
@@ -289,11 +768,22 @@
     const raw = String(rule).trim();
     if (!raw) return [];
 
+    /* JSON 书源：字段直读（放在最前面，优先于 CSS） */
+    if (ctx && ctx.json && typeof ctx.json === 'object') {
+      const f = jsonField(ctx.json, raw);
+      if (f !== undefined && f !== null) {
+        return Array.isArray(f) ? f.map(v => String(v)) : [String(f)];
+      }
+    }
+
     // 纯 JS 表达式
     if (/^\{\{[\s\S]*\}\}$/.test(raw) || /^@js:/i.test(raw)) {
       const expr = raw.replace(/^\{\{|\}\}$/g, '').replace(/^@js:/i, '');
-      const out = runJs(expr, ctx);
-      return out == null ? [] : [String(out)];
+      const out = runJs(expr, ctx || {});
+      if (out == null) return [];
+      if (Array.isArray(out)) return out.map(v => (v && typeof v === 'object' ? v : String(v)));
+      if (typeof out === 'object') return [out];
+      return [String(out)];
     }
 
     // 规则结果再做 @js 加工：@JSon:$.id@js:"chapter/"+result+"/content"
@@ -302,7 +792,9 @@
       const core = raw.slice(0, jsAt);
       const expr = raw.slice(jsAt + 4);
       const vals = evalRule(core, ctx);
-      const out = runJs(expr, { baseUrl: ctx.baseUrl, html: ctx.html, result: vals.length ? vals[0] : '' });
+      const out = runJs(expr, Object.assign({}, ctx, {
+        baseUrl: ctx.baseUrl, html: ctx.html, result: vals.length ? vals[0] : ''
+      }));
       if (out == null) return vals;
       return [String(out)];
     }
@@ -383,6 +875,10 @@
       enabled: s.enabled !== false,
       charset: s.charset || 'auto',
       type: 'legado',
+      /* 高级书源：协议全部写在 jsLib 里，规则只有一句 @js:xxx(java,...)。
+         以前这两个字段在归一化时被丢掉，这类源就彻底哑火（规则函数 undefined）。 */
+      jsLib: s.jsLib || '',
+      header: s.header || '',
       searchUrl: s.searchUrl || '',
       ruleSearch: {
         bookList: rs.bookList || '',
@@ -395,6 +891,8 @@
         lastChapter: rs.lastChapter || ''
       },
       ruleBookInfo: {
+        /* init：详情页先跑一段 JS（可发请求、解密），产出的 JSON/HTML 再喂给下面的字段规则 */
+        init: rbi.init || '',
         tocUrl: rbi.tocUrl || '',
         name: rbi.name || '',
         author: rbi.author || '',
@@ -444,18 +942,24 @@
   }
 
   async function search(fetchFn, src, key) {
-    let url = fillUrl(src.searchUrl, key);
+    let url = String(src.searchUrl || '');
+    /* 搜索地址本身可能是 @js:：高级书源用 JS 拼带签名/加密参数的接口地址 */
+    if (/^\{\{[\s\S]*\}\}$/.test(url) || /^@js:/i.test(url)) {
+      const expr = url.replace(/^\{\{|\}\}$/g, '').replace(/^@js:/i, '');
+      const v = runJs(expr, { src, key, baseUrl: src.url || '' });
+      url = v == null ? '' : String(v);
+    }
     if (!url) throw new Error('书源没有配置搜索地址');
     // 相对地址（/so.html?q={{key}}）按书源域名补全
     if (!/^https?:/i.test(url)) url = absUrl(src.url || '', url);
-    if (!/\{key\}|key=/.test(src.searchUrl) && !/%s/.test(src.searchUrl)) {
+    if (!/\{key\}|key=/.test(src.searchUrl) && !/%s/.test(src.searchUrl) && !/\?/.test(src.searchUrl)) {
       url += (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(key);
     }
     const { html, url: finalUrl } = await fetchDoc(fetchFn, url, src);
     let json = null;
     try { json = JSON.parse(html); } catch (e) { json = null; }
     const root = json ? null : doc(html);
-    const ctx = { doc: root, root, json: json || {}, html, baseUrl: finalUrl };
+    const ctx = { doc: root, root, json: json || {}, html, baseUrl: finalUrl, src, key };
 
     const listRule = src.ruleSearch.bookList;
     let cards = [];
@@ -463,7 +967,13 @@
        这种结果能凑出一堆链接，但未必真是书，检测/换源都要区别对待。 */
     let loose = false;
     if (listRule) {
-      if (/^\$/.test(listRule) && json) {
+      if (/^\{\{[\s\S]*\}\}$/.test(String(listRule)) || /^@js:/i.test(String(listRule))) {
+        /* JS 列表规则：直接返回书籍对象数组（或 JSON 字符串） */
+        const expr = String(listRule).replace(/^\{\{|\}\}$/g, '').replace(/^@js:/i, '');
+        let v = runJs(expr, { src, key, baseUrl: finalUrl, html, result: html });
+        if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { v = null; } }
+        if (Array.isArray(v)) cards = v.filter(x => x && typeof x === 'object');
+      } else if (/^\$/.test(listRule) && json) {
         const arr = jsonPathAll(json, listRule) || [];
         cards = arr.filter(x => x && typeof x === 'object');
       } else {
@@ -479,8 +989,8 @@
     const out = [];
     for (const c of cards.slice(0, 40)) {
       const cctx = typeof c === 'object' && c.nodeType
-        ? { doc: root, root: c, html, baseUrl: finalUrl, json: json || {} }
-        : { doc: root, root: root, html, baseUrl: finalUrl, json: c };
+        ? { doc: root, root: c, html, baseUrl: finalUrl, json: json || {}, src }
+        : { doc: root, root: root, html, baseUrl: finalUrl, json: c, src };
       const name = first(src.ruleSearch.name, cctx) || first('h3 a@text', cctx) || first('a@text', cctx);
       if (!name || name.length > 60) continue;
       const bookUrl = absUrl(finalUrl, first(src.ruleSearch.bookUrl, cctx) || first('a@href', cctx));
@@ -512,14 +1022,32 @@
     return String(t || '').replace(/\s+/g, ' ').trim().slice(0, 80);
   }
 
-  function pickChapters(root, baseUrl, src, json) {
+  function pickChapters(root, baseUrl, src, json, html) {
     const rows = [];
     const listRule = String(src.ruleToc.chapterList || '');
+    /* JS 目录规则：函数自己发请求、解密，直接返回章节数组（或 JSON 字符串） */
+    if (/^\{\{[\s\S]*\}\}$/.test(listRule) || /^@js:/i.test(listRule)) {
+      const expr = listRule.replace(/^\{\{|\}\}$/g, '').replace(/^@js:/i, '');
+      let v = runJs(expr, { src, baseUrl, html: html || '', result: html || '' });
+      if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { v = null; } }
+      if (Array.isArray(v)) {
+        for (const it of v) {
+          if (it == null) continue;
+          const obj = typeof it === 'object' ? it : { title: String(it), url: '' };
+          const cctx = { doc: root, root, html: '', baseUrl, json: obj, src };
+          const title = first(src.ruleToc.chapterName, cctx) || String(obj.title || obj.name || '');
+          const href = first(src.ruleToc.chapterUrl, cctx) || String(obj.url || obj.href || '');
+          if (!title || !href) continue;
+          rows.push({ title: cleanTitle(title), url: absUrl(baseUrl, href) });
+        }
+        return rows;
+      }
+    }
     // JSON 目录：@JSon:$.data.volumes..chapters[*] 这类接口型书源
     if (json && /^(\$|@json:)/i.test(listRule)) {
       const items = jsonPathAll(json, listRule.replace(/^@json:/i, ''));
       for (const it of items) {
-        const cctx = { doc: root, root, html: '', baseUrl, json: it };
+        const cctx = { doc: root, root, html: '', baseUrl, json: it, src };
         const title = first(src.ruleToc.chapterName, cctx);
         const href = first(src.ruleToc.chapterUrl, cctx);
         if (!title || !href) continue;
@@ -528,7 +1056,7 @@
       return rows;
     }
     for (const li of selectNodes(root, src.ruleToc.chapterList)) {
-      const cctx = { doc: root, root: li, html: '', baseUrl, json: {} };
+      const cctx = { doc: root, root: li, html: '', baseUrl, json: {}, src };
       const title = first(src.ruleToc.chapterName, cctx) || extract(li, 'text', baseUrl);
       const anchor = (li.querySelector && li.querySelector('a')) || li;
       const href = first(src.ruleToc.chapterUrl, cctx) || extract(anchor, 'href', baseUrl);
@@ -552,7 +1080,7 @@
     let cur = firstPage;
     const seen = new Set([cur.url]);
     for (let p = 0; p < 20; p++) {
-      const cctx = { doc: cur.root, root: cur.root, html: cur.html || '', baseUrl: cur.url, json: cur.json || {} };
+      const cctx = { doc: cur.root, root: cur.root, html: cur.html || '', baseUrl: cur.url, json: cur.json || {}, src };
       let next = first(rule, cctx);
       if (!next) {
         const ns = selectNodes(cur.root, rule);
@@ -566,7 +1094,7 @@
         const t = await fetchDoc(fetchFn, nu, src);
         const r2 = doc(t.html);
         const json2 = parseMaybeJson(t.html);
-        const more = pickChapters(r2, t.url, src, json2);
+        const more = pickChapters(r2, t.url, src, json2, t.html);
         if (!more.length) break;
         rows.push(...more);
         cur = { root: r2, url: t.url, html: t.html, json: json2 };
@@ -613,10 +1141,18 @@
   }
 
   async function getToc(fetchFn, src, bookUrl) {
-    const { html, url } = await fetchDoc(fetchFn, bookUrl, src);
+    const got = await fetchDoc(fetchFn, bookUrl, src);
+    let html = got.html, url = got.url;
+    /* 详情页 init：有些源把详情接口加密了，要先跑一段 JS 拿到明文再取字段 */
+    if (src.ruleBookInfo && src.ruleBookInfo.init) {
+      const expr = String(src.ruleBookInfo.init).replace(/^\{\{|\}\}$/g, '').replace(/^@js:/i, '');
+      const v = runJs(expr, { src, baseUrl: url, html, result: html });
+      if (typeof v === 'string' && v.trim()) html = v;
+      else if (v && typeof v === 'object') html = JSON.stringify(v);
+    }
     const root = doc(html);
     const json0 = parseMaybeJson(html);
-    const base = { doc: root, root, html, baseUrl: url, json: json0 || {} };
+    const base = { doc: root, root, html, baseUrl: url, json: json0 || {}, src };
 
     const info = {
       name: first(src.ruleBookInfo.name, base) || '',
@@ -627,7 +1163,7 @@
 
     const collect = async (r2, pageUrl, pageHtml) => {
       const pj = parseMaybeJson(pageHtml);
-      let c = dedupeChapters(pickChapters(r2, pageUrl, src, pj));
+      let c = dedupeChapters(pickChapters(r2, pageUrl, src, pj, pageHtml));
       c = dedupeChapters(await followTocPages(fetchFn, src, { root: r2, url: pageUrl, html: pageHtml, json: pj }, c));
       return c;
     };
@@ -644,7 +1180,7 @@
     }
 
     // 2) 当前页直接解析
-    let chapters = dedupeChapters(pickChapters(root, url, src, json0));
+    let chapters = dedupeChapters(pickChapters(root, url, src, json0, html));
     if (chapters.length >= 3) {
       chapters = dedupeChapters(await followTocPages(fetchFn, src, { root, url, html, json: json0 }, chapters));
       return { chapters, info, tocUrl: url };
@@ -656,7 +1192,7 @@
       try {
         const t = await fetchDoc(fetchFn, link, src);
         const r2 = doc(t.html);
-        let c = dedupeChapters(pickChapters(r2, t.url, src));
+        let c = dedupeChapters(pickChapters(r2, t.url, src, null, t.html));
         let loose = false;
         if (c.length < 3) {
           for (const sel of TOC_SELECTORS) {
@@ -717,7 +1253,7 @@
   async function getContent(fetchFn, src, chapterUrl) {
     const { html, url } = await fetchDoc(fetchFn, chapterUrl, src);
     const root = doc(html);
-    const base = { doc: root, root, html, baseUrl: url, json: {} };
+    const base = { doc: root, root, html, baseUrl: url, json: {}, src };
     const rule = src.ruleContent.content;
 
     // 收集多路候选，取“正文质量”最高的一份（站点改版/规则失配时不至于抓到导航块）
