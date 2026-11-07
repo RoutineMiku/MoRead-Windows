@@ -8,7 +8,7 @@
 
 **下载**（都在本仓库 [Releases](https://github.com/RoutineMiku/MoRead-Windows/releases)）：
 - Windows：`MoRead-win32-x64.zip`，解压后双击 `墨读.exe` 即可，免安装、不写注册表、数据跟着程序走
-- 安卓：[`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.4.6-android/MoRead-android.apk)（v0.4.6），直接安装（WebView 内置 Node 兼容层，桌面/安卓共用同一套阅读与书源逻辑）
+- 安卓：[`MoRead-android.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.5.0-android/MoRead-android.apk)（v0.5.0），直接安装（WebView 内置 Node 兼容层，桌面/安卓共用同一套阅读与书源逻辑）
 - 网页版（iOS / iPad / 任意浏览器）：**<https://routinemiku.github.io/MoRead-Windows/>** — 免安装、免账号，iPhone 上用 Safari 打开后「分享 → 添加到主屏幕」，就得到全屏独立图标
 
 ![书架](docs/screenshots/shot_shelf.png)
