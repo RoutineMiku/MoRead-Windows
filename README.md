@@ -7,19 +7,20 @@
 > 存档格式与原版「阅读」双向兼容，可以直接导入原版「阅读」导出的 zip 备份。
 > 同一套 `ui/` 跑在七个地方：Windows / Linux / macOS / Android / 浏览器 / 鸿蒙 / iOS。
 
-**下载**（全平台产物都在 [Releases · v0.6.3](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.3)）：
+**下载**（Windows / Android / 鸿蒙 / iOS 是最新的 [Releases · v0.6.7](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.7)；
+Linux 与 macOS 还是 v0.6.3 的包 —— 这两个平台的运行时包本期没有重出，链接指向旧标签，能用但功能落后）：
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| Windows x64 | [`MoRead-windows-0.6.3.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3/MoRead-windows-0.6.3.zip) | 解压后双击 `墨读.exe`，免安装、不写注册表，数据跟着程序走 |
-| Android 7+ | [`MoRead-android-0.6.3.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3/MoRead-android-0.6.3.apk) | 直接安装，WebView 内置 Node 兼容层（versionCode 603） |
+| Windows x64 | [`MoRead-windows-0.6.7.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.7/MoRead-windows-0.6.7.zip) | 解压后双击 `墨读.exe`，免安装、不写注册表，数据跟着程序走 |
+| Android 7+ | [`MoRead-android-0.6.7.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.7/MoRead-android-0.6.7.apk) | 直接安装，WebView 内置 Node 兼容层（versionCode 607） |
 | Linux x64 | [`MoRead-linux-x64-0.6.3.tar.gz`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3/MoRead-linux-x64-0.6.3.tar.gz) | 解压 → `./moread` 运行；`./install.sh` 装进应用菜单 |
 | Linux arm64 | [`MoRead-linux-arm64-0.6.3.tar.gz`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3/MoRead-linux-arm64-0.6.3.tar.gz) | 同上，树莓派 / ARM 小主机 |
 | macOS Intel | [`MoRead-mac-x64-0.6.3.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3/MoRead-mac-x64-0.6.3.zip) | 未签名：首次右键 → 打开，或 `xattr -dr com.apple.quarantine MoRead.app` |
 | macOS Apple Silicon | [`MoRead-mac-arm64-0.6.3.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3/MoRead-mac-arm64-0.6.3.zip) | 同上 |
 | 鸿蒙 4.x 及以下 | 同上 APK | 系统自带安卓兼容，直接装 |
-| 鸿蒙 NEXT (5.0) | [`MoRead-harmony-0.6.3.hap`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3/MoRead-harmony-0.6.3.hap) · [自签版](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3/MoRead-harmony-0.6.3-signed.hap) | ArkWeb 壳；未签名包用 DevEco 自动签名或自己的证书，自签版可直接 `hdc install`，见 `harmony/README.md` |
-| iOS 15+ | [`MoRead-0.6.3-unsigned.ipa`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.3/MoRead-0.6.3-unsigned.ipa) | 未签名 ipa（GitHub Actions 的 macOS runner 编的），Sideloadly 填自己 Apple ID 装，见 `ios/README.md` |
+| 鸿蒙 NEXT (5.0) | [`MoRead-harmony-0.6.7.hap`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.7/MoRead-harmony-0.6.7.hap) · [自签版](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.7/MoRead-harmony-0.6.7-signed.hap) | ArkWeb 壳；未签名包用 DevEco 自动签名或自己的证书，自签版可直接 `hdc install`，见 `harmony/README.md` |
+| iOS 15+ | [`MoRead-0.6.7-unsigned.ipa`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.7/MoRead-0.6.7-unsigned.ipa) | 未签名 ipa（GitHub Actions 的 macOS runner 编的），Sideloadly 填自己 Apple ID 装，见 `ios/README.md` |
 | 网页版 / iPad PWA | **<https://routinemiku.github.io/MoRead-Windows/>** | 免安装免账号，Safari「添加到主屏幕」即得全屏图标 |
 
 各平台怎么打、有哪些已知限制：**[docs/platforms.md](docs/platforms.md)**
