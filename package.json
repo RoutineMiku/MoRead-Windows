@@ -1,7 +1,7 @@
 {
   "name": "moread",
   "productName": "墨读",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "墨读 · Windows 桌面阅读器（本地书 + Legado 书源 + 网页搜书 + 坚果云同步）",
   "main": "src/main.js",
   "author": "MoRead",
