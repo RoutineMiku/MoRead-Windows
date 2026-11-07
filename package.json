@@ -1,7 +1,7 @@
 {
   "name": "moread",
   "productName": "墨读",
-  "version": "2.0.0",
+  "version": "0.5.0",
   "description": "墨读 · Windows 桌面阅读器（本地书 + Legado 书源 + 网页搜书 + 坚果云同步）",
   "main": "src/main.js",
   "author": "MoRead",
@@ -11,6 +11,8 @@
     "pack": "node build/pack.js",
     "dist": "node build/pack.js",
     "test": "node test/test-backup.js",
+    "version:show": "node build/version.js",
+    "version:bump": "node build/version.js --bump",
   "web": "node build/gen-web.js",
   "web:serve": "node build/gen-web.js && node build/serve-web.js",
   "web:deploy": "node build/gen-web.js && node web/deploy-pages.js"
