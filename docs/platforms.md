@@ -13,6 +13,9 @@
  src/main.js        MoBridge.kt   Index.ets     bridge-web.js  server/gateway.js
 ```
 
+iOS 不在上面这五列里：它是 WKWebView 壳，复用同一份 `bridge-web.js`，
+但多了应用内的 `127.0.0.1` 本地服务（`ios/MoRead/LocalServer.swift`），见 `ios/README.md`。
+
 ## 一览
 
 | 平台 | 产物 | 状态 | 构建命令 |
@@ -26,6 +29,16 @@
 | HarmonyOS NEXT (5.0) | `MoRead-harmony-*.hap` | ✅ **能编出 hap**（OpenHarmony SDK + hvigor，未在真机验证） | `npm run harmony:pack` |
 | iOS / iPadOS | PWA | ✅ 现在就能用 | — |
 | iOS 原生 | `MoRead-*-unsigned.ipa` | ✅ **已出包**（GitHub Actions 的 macOS runner），未真机验证 | Actions → `ios-ipa.yml` |
+
+出完包统一发到 GitHub Releases（一条命令，可重复运行，同名同尺寸的会跳过）：
+
+```bash
+GH_TOKEN=xxx npm run release:publish -- v0.6.3
+```
+
+它会建 tag（指向 main 的 HEAD）+ Release，把 `dist/` 里九个产物逐个上传，
+最后打印远端资产清单；`--dry` 只列清单不上传。
+
 
 ## 桌面三端（Electron）
 
