@@ -149,9 +149,24 @@
     if (now) run(); else saveTimer = setTimeout(run, 700);
   }
 
+  /* 0.6.1 排版改版的一次性迁移：老默认行距 2.0 太散（一屏少看四五行），
+     段落间距又由行距推导成 1.05em。只动「还用着老默认值」的存档，
+     自己调过行距的人保持原样。 */
+  function migrateTypo() {
+    const s = S.state && S.state.settings;
+    if (!s || s.typoV) return;
+    /* 只校正「还是老默认值」的存档：自己调过行距/段距的人保持原样 */
+    if (s.lineHeight >= 1.95) s.lineHeight = 1.7;
+    if (!(typeof s.paraGapEm === 'number')) s.paraGapEm = s.paraGap ? (s.lineHeight > 1.9 ? 1.05 : .8) : .2;
+    if (s.paraGapEm > 0.9) s.paraGapEm = 0.5;
+    s.typoV = 1;
+    try { save(); } catch (e) { /* 存档写失败也不该挡住启动 */ }
+  }
+
   async function boot() {
     S.info = await mo.info();
     S.state = await mo.state.get();
+    try { migrateTypo(); } catch (e) { console.error('排版迁移失败：', e); }
     applySettings();
     // 同样逐个隔离：绑定阶段任何一步挂掉都只丢它自己，不影响导航和其它功能
     try { bindChrome(); } catch (e) { console.error('bindChrome 失败：', e); }
@@ -2054,8 +2069,10 @@
           <h3>阅读</h3>
           <div class="row"><div class="rl">默认字号</div>
             <input type="range" id="s-fs" min="15" max="30" value="${s.fontSize}" /><span class="rv" id="s-fs-v">${s.fontSize}px</span></div>
-          <div class="row"><div class="rl">行距</div>
-            <input type="range" id="s-lh" min="14" max="26" value="${Math.round(s.lineHeight * 10)}" /><span class="rv" id="s-lh-v">${s.lineHeight.toFixed(1)}</span></div>
+          <div class="row"><div class="rl">行距<small>1.6~1.8 最接近纸书，越大一屏字越少</small></div>
+            <input type="range" id="s-lh" min="12" max="24" step="1" value="${Math.round(s.lineHeight * 10)}" /><span class="rv" id="s-lh-v">${s.lineHeight.toFixed(1)}</span></div>
+          <div class="row"><div class="rl">段距<small>段落之间空多少，只在阅读页生效</small></div>
+            <input type="range" id="s-pg" min="0" max="150" step="5" value="${Math.round(paraGapEm(s) * 100)}" /><span class="rv" id="s-pg-v">${paraGapEm(s).toFixed(2)}em</span></div>
           <div class="row"><div class="rl">字体</div>
             <div class="seg" id="s-font"><button data-v="serif" class="${s.fontFamily === 'serif' ? 'on' : ''}">宋体</button>
             <button data-v="sans" class="${s.fontFamily === 'sans' ? 'on' : ''}">黑体</button></div></div>
@@ -2164,6 +2181,8 @@
 
         <div class="card" style="grid-column:1/-1">
           <h3>关于</h3>
+          <div class="row"><div class="rl">关于墨读<small>版本信息 · 开源地址 · 公众号</small></div>
+            <button class="btn sm" id="open-about">查看</button></div>
           <div class="row"><div class="rl">版本<small>${IS_ANDROID ? `墨读 ${esc(S.info.version)} · Android` : (S.info.platform === 'web' ? `墨读 ${esc(S.info.version)} · 网页版` : `墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}`)}</small></div>
             <span class="rv">${IS_ANDROID ? '数据只存本机' : (S.info.portable ? '便携模式 · 数据在程序目录' : '数据只存本地')}</span></div>
           <div class="row"><div class="rl">数据位置<small>${esc(S.info.paths.root)}</small></div>
@@ -2179,6 +2198,10 @@
     $('#s-lh').oninput = e => {
       s.lineHeight = +e.target.value / 10; $('#s-lh-v').textContent = s.lineHeight.toFixed(1); applyReaderStyle(); save();
     };
+    $('#s-pg').oninput = e => {
+      s.paraGapEm = +e.target.value / 100; s.paraGap = s.paraGapEm > 0;
+      $('#s-pg-v').textContent = s.paraGapEm.toFixed(2) + 'em'; applyReaderStyle(); save();
+    };
     $$('#s-font button').forEach(b => b.onclick = () => {
       $$('#s-font button').forEach(x => x.classList.remove('on'));
       b.classList.add('on'); s.fontFamily = b.dataset.v; applyReaderStyle(); save();
@@ -2186,7 +2209,7 @@
     $$('#s-mode button').forEach(b => b.onclick = () => {
       $$('#s-mode button').forEach(x => x.classList.remove('on'));
       b.classList.add('on'); s.pageMode = b.dataset.v; save();
-      if (R.book) { $('#r-mode').textContent = s.pageMode === 'paged' ? '翻页' : '滚动'; renderChapter(); }
+      if (R.book) renderChapter();
     });
     $$('#s-conc button').forEach(b => b.onclick = () => {
       $$('#s-conc button').forEach(x => x.classList.remove('on'));
@@ -2216,6 +2239,7 @@
     /* 安卓没有「文件管理器」可跳转，这两个按钮根本不会渲染出来，要判空 */
     if ($('#open-dir')) $('#open-dir').onclick = () => mo.openDir && mo.openDir();
     if ($('#open-dir2')) $('#open-dir2').onclick = () => mo.openDir && mo.openDir();
+    if ($('#open-about')) $('#open-about').onclick = aboutPanel;
     /* 网页版：书源代理地址（存 localStorage，由浏览器桥的 http 层读取） */
     if ($('#web-proxy')) $('#web-proxy').onchange = () => {
       try { localStorage.setItem('moread.proxy', $('#web-proxy').value.trim()); } catch (e) { }
@@ -2631,10 +2655,15 @@
     const s = S.state.settings;
     $('#reader').dataset.theme = s.theme;
     $$('#r-swatches .sw').forEach(el => el.classList.toggle('on', el.dataset.t === s.theme));
-    $('#r-mode').textContent = s.pageMode === 'paged' ? '翻页' : '滚动';
-    $('#r-font').textContent = s.fontFamily === 'serif' ? '宋体' : '黑体';
     $('#r-fs-num').textContent = s.fontSize;
     applyShelfPrefs();
+  }
+
+  /* 段距：独立设置项（em）。没有该字段的旧存档按旧的推导规则回填，
+     避免升级后老用户的段落突然贴在一起。 */
+  function paraGapEm(s) {
+    if (typeof s.paraGapEm === 'number') return clamp(s.paraGapEm, 0, 2);
+    return s.paraGap ? (s.lineHeight > 1.9 ? 1.05 : .8) : .2;
   }
 
   function applyReaderStyle() {
@@ -2643,14 +2672,12 @@
     if (!page) return;
     page.style.setProperty('--r-fs', s.fontSize + 'px');
     page.style.setProperty('--r-lh', s.lineHeight);
-    page.style.setProperty('--para-gap', (s.paraGap ? (s.lineHeight > 1.9 ? 1.05 : .8) : .2) + 'em');
+    page.style.setProperty('--para-gap', paraGapEm(s) + 'em');
     /* 分页模式一行最多约 58 字：字号变大时书页跟着变宽，超宽屏也不会拉成一条长行 */
     page.style.setProperty('--page-max', Math.round(s.fontSize * 58) + 'px');
     page.classList.toggle('nofamily', s.fontFamily !== 'serif');
     $('#reader').classList.toggle('mode-paged', s.pageMode === 'paged');
     $('#r-fs-num').textContent = s.fontSize;
-    $('#r-font').textContent = s.fontFamily === 'serif' ? '宋体' : '黑体';
-    $('#r-mode').textContent = s.pageMode === 'paged' ? '翻页' : '滚动';
     /* 分页时底栏翻的是页，不是章 —— 文案跟着模式走，免得以为一下跳一章 */
     const prev = $('#r-prev'), next = $('#r-next');
     if (prev) prev.textContent = s.pageMode === 'paged' ? '上一页' : '上一章';
@@ -3033,7 +3060,7 @@
   function pageTailHtml() { return `<div class="end">本章完</div>`; }
 
   function measPadV(s) {
-    return (s.paraGap ? (s.lineHeight > 1.9 ? 1.05 : .8) : .2) + 'em';
+    return paraGapEm(s) + 'em';
   }
   function layoutPages(force) {
     const stage = $('#r-stage'), page = $('#r-page');
@@ -3061,8 +3088,7 @@
       d.style.cssText = boxStyle;
       d.style.setProperty('--r-fs', s.fontSize + 'px');
       d.style.setProperty('--r-lh', s.lineHeight);
-      d.style.setProperty('--para-gap', measPadV(s));
-      d.innerHTML = inner;
+      d.style.setProperty('--para-gap', measPadV(s));      d.innerHTML = inner;
       /* 正文区在真实页里是 flex 容器（竖向摊开），测量盒要还原成块级流，
          否则段落高度相加的口径和渲染时不一致 */
       d.querySelectorAll('.body').forEach(b => { b.style.display = 'block'; b.style.flex = 'none'; });
@@ -3089,7 +3115,7 @@
     const availH = Math.max(80, Math.round(stage.clientHeight - baseNext));
     /* 首页要多扣「书名 + 章节标题」比一行页眉多出来的高度 */
     const firstPenalty = Math.max(0, Math.round(baseFirst - baseNext));
-    const key = [availW, availH, firstPenalty, s.fontSize, s.lineHeight, s.fontFamily, s.paraGap ? 1 : 0,
+    const key = [availW, availH, firstPenalty, s.fontSize, s.lineHeight, s.fontFamily, paraGapEm(s),
       R.paras.length, R.ci, (R.book || {}).id, R.title].join('|');
     if (!force && key === pagedKey && pagedPages) {
       R.pages = pagedPages;
@@ -3514,6 +3540,117 @@
     setTimeout(speakNext, 60);
   }
 
+  /* 关于我们：版本、开源地址、公众号二维码。
+     三端共用这一个弹窗，图片走相对路径（ui/ 与 dist-web 里各放一份）。 */
+  const GITHUB_URL = 'https://github.com/RoutineMiku/MoRead-Windows';
+  function aboutPanel() {
+    const plat = S.info.platform === 'android' ? 'Android'
+      : (S.info.platform === 'web' ? '网页版' : (S.info.platform === 'darwin' ? 'macOS' : 'Windows'));
+    openModal(`<div class="about">
+      <img class="about-logo" src="logo.png" alt="墨读" />
+      <div class="about-name">墨读</div>
+      <div class="about-ver">v${esc(S.info.version)} · ${plat}</div>
+      <p class="about-desc">本地优先的阅读器。书架、书源、进度、备份都在你自己手里，不上传、不追踪，换设备用备份文件搬走。</p>
+      <a class="about-link" href="${GITHUB_URL}" target="_blank" rel="noreferrer noopener">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>RoutineMiku / MoRead-Windows</span>
+      </a>
+      <div class="about-qr">
+        <img src="gzh-qr.jpg" alt="公众号二维码" />
+        <span>微信扫码关注公众号<br /><small>版本更新与书源分享都在这里</small></span>
+      </div>
+      <div class="about-by">powered by <b>routinemiku</b></div>
+    </div>
+    <div class="modal-actions"><button class="btn primary" id="ab-ok">知道了</button></div>`);
+    $('#ab-ok').onclick = closeModal;
+  }
+
+  /* 阅读器里的「Aa」排版面板：字号 / 行距 / 段距 / 字体 / 翻页方式 / 主题。
+     行距、段距以前只能去设置页调，而且段距由行距推导，压不紧段落。 */
+  let typesetT = null;
+  function typesetPanel() {
+    const s = S.state.settings;
+    const show = () => ({
+      fs: s.fontSize + 'px',
+      lh: s.lineHeight.toFixed(2).replace(/0$/, ''),
+      pg: paraGapEm(s).toFixed(2) + 'em'
+    });
+    const v0 = show();
+    openModal(`<h3>排版</h3>
+      <p class="desc">拖动即时生效 · 只影响阅读页</p>
+      <div class="ts-grid">
+        <div class="ts-row"><span class="ts-k">字号</span>
+          <input type="range" id="ts-fs" min="15" max="30" step="1" value="${s.fontSize}" />
+          <span class="ts-v" id="ts-fs-v">${v0.fs}</span></div>
+        <div class="ts-row"><span class="ts-k">行距</span>
+          <input type="range" id="ts-lh" min="120" max="240" step="5" value="${Math.round(s.lineHeight * 100)}" />
+          <span class="ts-v" id="ts-lh-v">${v0.lh}</span></div>
+        <div class="ts-row"><span class="ts-k">段距</span>
+          <input type="range" id="ts-pg" min="0" max="150" step="5" value="${Math.round(paraGapEm(s) * 100)}" />
+          <span class="ts-v" id="ts-pg-v">${v0.pg}</span></div>
+        <div class="ts-row"><span class="ts-k">字体</span>
+          <div class="seg" id="ts-font"><button data-v="serif" class="${s.fontFamily === 'serif' ? 'on' : ''}">宋体</button><button data-v="sans" class="${s.fontFamily === 'sans' ? 'on' : ''}">黑体</button></div>
+          <span class="ts-v"></span></div>
+        <div class="ts-row"><span class="ts-k">翻页</span>
+          <div class="seg" id="ts-mode"><button data-v="scroll" class="${s.pageMode === 'scroll' ? 'on' : ''}">滚动</button><button data-v="paged" class="${s.pageMode === 'paged' ? 'on' : ''}">翻页</button></div>
+          <span class="ts-v"></span></div>
+        <div class="ts-row"><span class="ts-k">主题</span>
+          <div class="swatches" id="ts-theme">
+            <button class="sw ${s.theme === 'paper' ? 'on' : ''}" data-t="paper" style="background:#fbfaf7" title="纸白"></button>
+            <button class="sw ${s.theme === 'sepia' ? 'on' : ''}" data-t="sepia" style="background:#f6efe1" title="米黄"></button>
+            <button class="sw ${s.theme === 'green' ? 'on' : ''}" data-t="green" style="background:#e6efe4" title="浅绿"></button>
+            <button class="sw ${s.theme === 'night' ? 'on' : ''}" data-t="night" style="background:#1a1e24" title="夜间"></button>
+          </div><span class="ts-v"></span></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="ts-reset">恢复推荐</button>
+        <button class="btn primary" id="ts-done">完成</button>
+      </div>`);
+
+    /* 拖动时只更新样式，重排交给 90ms 防抖：一页几百段时每移动 1px 都重排会明显卡手 */
+    const relayout = () => {
+      applyReaderStyle();
+      if (!R.book || !R.paras.length) return;
+      clearTimeout(typesetT);
+      typesetT = setTimeout(() => { try { renderChapter(); } catch (e) { /* 重排失败不该打断拖动 */ } }, 90);
+    };
+    const bindRange = (id, onInput) => {
+      const el = $('#' + id);
+      if (!el) return;
+      el.oninput = () => onInput(+el.value);
+      el.onchange = () => save();
+    };
+    bindRange('ts-fs', v => {
+      s.fontSize = v; $('#ts-fs-v').textContent = v + 'px'; relayout();
+    });
+    bindRange('ts-lh', v => {
+      s.lineHeight = v / 100; $('#ts-lh-v').textContent = (v / 100).toFixed(2).replace(/0$/, ''); relayout();
+    });
+    bindRange('ts-pg', v => {
+      s.paraGapEm = v / 100; s.paraGap = v > 0;
+      $('#ts-pg-v').textContent = (v / 100).toFixed(2) + 'em'; relayout();
+    });
+    $$('#ts-font button').forEach(b => b.onclick = () => {
+      $$('#ts-font button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on'); s.fontFamily = b.dataset.v; relayout(); save();
+    });
+    $$('#ts-mode button').forEach(b => b.onclick = () => {
+      $$('#ts-mode button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on'); s.pageMode = b.dataset.v; R.page = 0; relayout(); save();
+    });
+    $$('#ts-theme .sw').forEach(el => el.onclick = () => {
+      $$('#ts-theme .sw').forEach(x => x.classList.remove('on'));
+      el.classList.add('on'); setTheme(el.dataset.t); save();
+    });
+    $('#ts-reset').onclick = () => {
+      s.fontSize = 19; s.lineHeight = 1.7; s.paraGapEm = 0.5; s.paraGap = true;
+      s.fontFamily = 'serif'; s.typoV = 1;
+      applyReaderStyle(); if (R.book && R.paras.length) renderChapter(); save();
+      closeModal(); toast('已恢复推荐排版');
+    };
+    $('#ts-done').onclick = () => { save(); closeModal(); };
+  }
+
   function ttsPanel() {
     const cfg = ttsCfg();
     const voices = ttsOrderedVoices();
@@ -3832,16 +3969,7 @@
       S.state.settings.fontSize = clamp(S.state.settings.fontSize - 1, 15, 30);
       applyReaderStyle(); if (R.paras.length) renderChapter(0); save();
     };
-    $('#r-mode').onclick = () => {
-      const s = S.state.settings;
-      s.pageMode = s.pageMode === 'paged' ? 'scroll' : 'paged';
-      R.page = 0; renderChapter(0); save();
-    };
-    $('#r-font').onclick = () => {
-      const s = S.state.settings;
-      s.fontFamily = s.fontFamily === 'serif' ? 'sans' : 'serif';
-      renderChapter(0); save();
-    };
+    $('#r-type').onclick = typesetPanel;
     $('#r-toc').onclick = () => {
       const open = $('#r-toc-panel').classList.toggle('open');
       $('#toc-mask').classList.toggle('on', open);
