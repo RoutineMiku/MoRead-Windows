@@ -443,25 +443,138 @@
       }
     }
   ];
-  const EXT_NAME = { sources: '书源', history: '阅读历史', stats: '阅读统计' };
+  const EXT_NAME = { sources: '书源', history: '阅读历史', stats: '阅读统计', addon: '添加扩展' };
+
+  /* ---------------- 用户导入的扩展 ----------------
+   * 开发者写一个 HTML 面板（或给一个站点地址），包成 JSON 导进来，扩展菜单就多
+   * 一张卡；点开就是面板。面板跑在 sandbox iframe 里，跟宿主只通过 postMessage
+   * 说话（教程与接口清单见「添加扩展」子页）：
+   *   parent.postMessage({ moread:'toast',  text:'导入成功' }, '*')
+   *   parent.postMessage({ moread:'context' }, '*')          → 宿主回 context
+   *   parent.postMessage({ moread:'search', q:'书名' }, '*')
+   *   parent.postMessage({ moread:'openBook', id:'…', chapter:0 }, '*')
+   * 存 data.json 的 addons 数组，跟着备份/换设备一起走。 */
+  const ADDON_ICONS = {
+    puzzle: '<path d="M10 4.6a2 2 0 1 1 4 0V6h2.4A1.6 1.6 0 0 1 18 7.6V10h1.4a2 2 0 1 1 0 4H18v2.4A1.6 1.6 0 0 1 16.4 18H14v-1.4a2 2 0 1 0-4 0V18H7.6A1.6 1.6 0 0 1 6 16.4V14H4.6a2 2 0 1 1 0-4H6V7.6A1.6 1.6 0 0 1 7.6 6H10z"/>',
+    plus: '<path d="M12 5.2v13.6M5.2 12h13.6"/>',
+    timer: '<circle cx="12" cy="13.2" r="6.8"/><path d="M12 9.8v3.6l2.2 1.4M9.4 3.6h5.2"/>',
+    star: '<path d="M12 4.4l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16.8l-4.8 2.5.9-5.4L4.2 10.1l5.4-.8z"/>',
+    cloud: '<path d="M7.2 18h9.3a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6-1.2A3.9 3.9 0 0 0 7.2 18z"/>',
+    note: '<path d="M6 3.8h9l3 3v13.4H6z"/><path d="M9 8.6h6M9 12h6M9 15.4h4"/>',
+    code: '<path d="M9 8.2l-3.4 3.8L9 15.8M15 8.2l3.4 3.8L15 15.8"/>',
+    book: '<path d="M4.2 5.6A1.6 1.6 0 0 1 5.8 4H10v16H5.8a1.6 1.6 0 0 1-1.6-1.6z"/><path d="M10 4h4.2a1.6 1.6 0 0 1 1.6 1.6v12.8a1.6 1.6 0 0 1-1.6 1.6H10"/>'
+  };
+  const addonIcon = k => ADDON_ICONS[k] || ADDON_ICONS.puzzle;
+  const addonList = () => (S.state && Array.isArray(S.state.addons)) ? S.state.addons : [];
+
+  function addonSlug(name) {
+    const s = String(name || '').toLowerCase()
+      .replace(/[^\w\u4e00-\u9fa5-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+    return (s || 'ext') + '-' + Date.now().toString(36).slice(-4);
+  }
+
+  /** 把粘贴/文件读到的文本解析成扩展对象；格式不对就抛错误给用户看 */
+  function parseAddon(raw, filename) {
+    const txt = String(raw || '').trim();
+    if (!txt) throw new Error('内容是空的');
+    let o;
+    if (txt[0] === '{') {
+      try { o = JSON.parse(txt); } catch (e) { throw new Error('JSON 格式不对：' + (e.message || e)); }
+    } else if (txt[0] === '[') {
+      throw new Error('一次只能导入一个扩展，请把数组拆成单个对象');
+    } else {
+      /* 直接丢一个 .html 进来：整个文件当面板，名字取 <title> 或文件名 */
+      const t = (txt.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1];
+      const nm = (t || String(filename || '').replace(/\.[^.]+$/, '') || '未命名扩展').trim();
+      o = { name: nm, type: 'html', html: txt };
+    }
+    const name = String(o.name || '').trim();
+    if (!name) throw new Error('缺少 name（扩展名称）');
+    const url = String(o.url || '').trim();
+    const html = String(o.html || '');
+    const type = url && !html.trim() ? 'link' : 'html';
+    if (type === 'html' && !html.trim()) throw new Error('缺少 html（面板内容），或改成填 url（站点地址）');
+    if (type === 'link' && !/^https?:\/\//i.test(url)) throw new Error('url 必须以 http:// 或 https:// 开头');
+    if (html.length > 400 * 1024) throw new Error('面板超过 400KB，建议精简一下或改用 url 方式');
+    return {
+      id: String(o.id || '').trim().replace(/[^\w.:-]/g, '') || addonSlug(name),
+      name: name.slice(0, 40),
+      desc: (String(o.desc || '').trim() || (type === 'link' ? url.replace(/^https?:\/\//i, '') : '自定义扩展')).slice(0, 80),
+      version: String(o.version || '1.0.0').slice(0, 16),
+      author: String(o.author || '').slice(0, 40),
+      icon: ADDON_ICONS[o.icon] ? o.icon : 'puzzle',
+      type, html, url,
+      enabled: o.enabled !== false,
+      at: Date.now()
+    };
+  }
+
+  const ADDON_DEMO = {
+    name: '阅读小助手',
+    desc: '示例：显示当前在读的书',
+    version: '1.0.0',
+    author: '墨读',
+    icon: 'star',
+    type: 'html',
+    html: `<div style="font:14px/1.7 system-ui;padding:20px;color:#1a1e26">
+  <h3 style="margin:0 0 10px">阅读小助手</h3>
+  <p id="ctx" style="color:#6b7280">正在读取当前状态…</p>
+  <button id="go" style="margin-top:8px;padding:7px 14px;border:0;border-radius:8px;background:#2b6ce0;color:#fff">回到书架</button>
+  <script>
+    parent.postMessage({ moread:'context' }, '*');
+    addEventListener('message', e => {
+      const d = e.data || {};
+      if (d.moread !== 'context') return;
+      const b = d.data && d.data.book;
+      document.getElementById('ctx').textContent = b
+        ? '在读：' + b.name + '（' + (d.data.chapterTitle || '第 ' + (b.chapter + 1) + ' 章') + '）'
+        : '还没打开书，去书架挑一本吧。';
+    });
+    document.getElementById('go').onclick = () => parent.postMessage({ moread:'shelf' }, '*');
+  <\/script>
+</div>`
+  };
+
+  function addonCard(a) {
+    return `<button class="ext-card" data-ext="addon:${esc(a.id)}">
+      <span class="ext-ico">${a.type === 'link' ? '<svg viewBox="0 0 24 24"><path d="M10 13.6a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.3 1.3"/><path d="M14 10.4a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 0 0 5.7 5.7l1.3-1.3"/></svg>' : `<svg viewBox="0 0 24 24">${addonIcon(a.icon)}</svg>`}</span>
+      <span class="ext-info"><b>${esc(a.name)}</b><i>${esc(a.desc)}</i></span>
+      <span class="ext-stat">v${esc(a.version)}${a.author ? ' · ' + esc(a.author) : ''}</span>
+    </button>`;
+  }
+
+  const extTitle = () => {
+    if (!S.ext) return '扩展';
+    if (S.ext.indexOf('addon:') === 0) {
+      const a = addonList().find(x => x.id === S.ext.slice(6));
+      return a ? a.name : '扩展';
+    }
+    return EXT_NAME[S.ext] || '扩展';
+  };
 
   function renderExt() {
     const v = $('#view-ext');
     if (!v) return;
     if (!S.ext) {
       v.innerHTML = `
-        <div class="page-head"><h1>扩展</h1><span class="sub">书源、历史、统计都在这里，以后的新功能也往这儿加</span></div>
+        <div class="page-head"><h1>扩展</h1></div>
         <div class="ext-grid">
           ${EXT.map(e => `<button class="ext-card" data-ext="${e.k}">
             <span class="ext-ico"><svg viewBox="0 0 24 24">${e.icon}</svg></span>
             <span class="ext-info"><b>${e.name}</b><i>${e.desc}</i></span>
             <span class="ext-stat">${esc(e.stat())}</span>
           </button>`).join('')}
+          ${addonList().map(addonCard).join('')}
+          <button class="ext-card addon-add" data-ext="addon">
+            <span class="ext-ico"><svg viewBox="0 0 24 24">${ADDON_ICONS.plus}</svg></span>
+            <span class="ext-info"><b>添加扩展</b><i>导入开发者做的功能面板 · 附教程</i></span>
+            <span class="ext-stat">JSON / HTML</span>
+          </button>
         </div>`;
       $$('#view-ext [data-ext]').forEach(b => b.onclick = () => {
         S.ext = b.dataset.ext;
         const t = $('#tb-title');
-        if (t) t.textContent = EXT_NAME[S.ext] || '扩展';
+        if (t) t.textContent = extTitle();
         renderExt();
       });
       return;
@@ -480,10 +593,247 @@
     if (S.ext === 'sources') renderSources(host);
     else if (S.ext === 'history') renderHistory(host);
     else if (S.ext === 'stats') renderStats(host);
+    else if (S.ext === 'addon') renderAddonManager(host);
+    else if (S.ext.indexOf('addon:') === 0) renderAddonPanel(host, S.ext.slice(6));
     /* 返回按钮插进子页自己的 .page-head，跟着吸顶一起走 */
     const head = host.querySelector('.page-head');
     if (head) head.insertBefore(back, head.firstChild); else host.insertBefore(back, host.firstChild);
   }
+
+  /* ---------------- 添加扩展：导入 · 教程 · 管理 ---------------- */
+  const ADDON_EXT_RE = /\.(json|html?|txt)$/i;
+
+  /** 解析 + 落库（同名同 id 会问一下覆盖）。成功返回扩展对象，失败返回 null。 */
+  async function importAddon(raw, fname) {
+    let a;
+    try { a = parseAddon(raw, fname); } catch (e) { toast(e.message || String(e), 4000); return null; }
+    const arr = addonList();
+    const dup = arr.find(x => x.id === a.id || x.name === a.name);
+    if (dup) {
+      const ok = await confirmAsk({
+        title: '覆盖扩展',
+        text: `已经有「${esc(dup.name)}」了，用这次导入的内容覆盖它？`,
+        ok: '覆盖'
+      });
+      if (!ok) return null;
+      Object.assign(dup, a, { id: dup.id, at: Date.now() });
+    } else {
+      arr.push(a);
+    }
+    S.state.addons = arr;
+    save(true);
+    return a;
+  }
+
+  async function importAddonFile(file) {
+    if (!file) return;
+    let txt = '';
+    try { txt = await file.text(); } catch (e) { toast('读文件失败：' + (e.message || e)); return; }
+    const a = await importAddon(txt, file.name);
+    if (a) { toast(`已导入「${a.name}」`); renderExt(); }
+  }
+
+  function renderAddonManager(host) {
+    const list = addonList();
+    host.innerHTML = `
+      <div class="page-head"><h1>添加扩展</h1>
+        <span class="sub">${list.length ? `已安装 ${list.length} 个` : '还没有导入过扩展'}</span></div>
+      <div class="set-wrap one">
+        <div class="card">
+          <h3>导入扩展</h3>
+          <div class="addon-drop" id="addon-drop">
+            <b>把 .json / .html 拖进窗口</b>
+            <span>也可以粘贴到下面，或点「选文件」</span>
+          </div>
+          <textarea class="addon-text" id="addon-text" spellcheck="false"
+            placeholder='{"name":"我的扩展","desc":"一句话说明","html":"<div>你好，墨读</div>"}'></textarea>
+          <div class="addon-acts">
+            <button class="btn primary" id="addon-import">导入</button>
+            <button class="btn" id="addon-file">选文件…</button>
+            <button class="btn ghost" id="addon-demo">填入示例</button>
+            <input type="file" id="addon-input" accept=".json,.html,.htm,.txt,application/json,text/html" hidden />
+          </div>
+          <p class="addon-tip">两种扩展：<b>HTML 面板</b>（自带界面，最常用）或 <b>站点入口</b>（填一个网址，浏览器里打开）。导入后扩展菜单里就会多一张卡。</p>
+        </div>
+
+        <div class="card">
+          <h3>教程 · 三步做一个扩展</h3>
+          <ol class="addon-steps">
+            <li><b>写面板</b>：新建一个 <code>.html</code>，正常写 HTML / CSS / JS，不用管墨读的样式。</li>
+            <li><b>写清单</b>：把面板内容放进 <code>html</code> 字段（整段 HTML 转义成字符串），或者只填 <code>url</code> 做成站点入口。</li>
+            <li><b>导入</b>：把 JSON 拖进窗口、或粘贴到上面，成功后扩展菜单多一张卡，点开就是面板。</li>
+          </ol>
+          <pre class="addon-code">{
+  "name": "阅读小助手",
+  "desc": "显示当前在读的书",
+  "version": "1.0.0",
+  "author": "你的名字",
+  "icon": "star",
+  "html": "&lt;div&gt;你好，墨读&lt;/div&gt;"
+}</pre>
+          <p class="addon-tip">必填只有 <code>name</code> 和 <code>html</code>（或 <code>url</code>）。<code>icon</code> 可选 puzzle / star / timer / cloud / note / code / book。</p>
+        </div>
+
+        <div class="card">
+          <h3>面板怎么跟墨读说话</h3>
+          <pre class="addon-code">// 面板（iframe）里执行
+parent.postMessage({ moread:'toast', text:'你好' }, '*');
+parent.postMessage({ moread:'context' }, '*');      // 取当前在读
+parent.postMessage({ moread:'search', q:'三体' }, '*');
+parent.postMessage({ moread:'openBook', id:'…', chapter:0 }, '*');
+parent.postMessage({ moread:'shelf' }, '*');       // 回书架
+
+// 听宿主回复
+addEventListener('message', e => {
+  if (e.data &amp;&amp; e.data.moread === 'context') {
+    console.log(e.data.data);   // { book, chapterTitle, theme, fontSize }
+  }
+});</pre>
+          <p class="addon-tip">面板跑在沙箱里，读不到书库和存档；需要什么就问宿主。分发给别人只要给这一个 JSON 文件，对方导入即用。</p>
+        </div>
+
+        <div class="card">
+          <h3>已安装<span class="chip">${list.length} 个</span></h3>
+          ${list.length ? list.map(a => `
+            <div class="addon-row">
+              <span class="addon-row-ico"><svg viewBox="0 0 24 24">${addonIcon(a.icon)}</svg></span>
+              <span class="rl"><b>${esc(a.name)}</b>
+                <i>${esc(a.desc)} · v${esc(a.version)}${a.author ? ' · ' + esc(a.author) : ''}</i></span>
+              <button class="btn sm" data-addon-open="${esc(a.id)}">打开</button>
+              <button class="btn sm danger" data-addon-del="${esc(a.id)}">移除</button>
+            </div>`).join('') : `<div class="empty">还没有扩展，拖个 JSON 进来试试。</div>`}
+        </div>
+      </div>`;
+
+    const ta = $('#addon-text');
+    const doImport = async (raw, fname) => {
+      const a = await importAddon(raw, fname);
+      if (a) { toast(`已导入「${a.name}」`); renderExt(); }
+      return !!a;
+    };
+
+    $('#addon-import').onclick = () => {
+      const txt = (ta && ta.value || '').trim();
+      if (!txt) { toast('先粘贴扩展内容，或点「选文件」'); return; }
+      doImport(txt, '');
+    };
+    $('#addon-demo').onclick = () => {
+      if (ta) { ta.value = JSON.stringify(ADDON_DEMO, null, 2); ta.focus(); }
+      toast('这是一份能直接导入的示例');
+    };
+    $('#addon-input').onchange = async e => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      try { await doImport(await f.text(), f.name); } catch (err) { toast('读文件失败：' + (err.message || err)); }
+      e.target.value = '';
+    };
+    $('#addon-file').onclick = () => $('#addon-input').click();
+
+    /* 拖到这张卡片上也认：拖拽事件被全局接走时只改文案，见 bindDropZone */
+    const drop = $('#addon-drop');
+    drop.onclick = () => {
+      const inp = $('#addon-input');
+      if (inp) inp.click();
+    };
+
+    $$('[data-addon-open]').forEach(b => b.onclick = () => {
+      S.ext = 'addon:' + b.dataset.addonOpen;
+      const t = $('#tb-title');
+      if (t) t.textContent = extTitle();
+      renderExt();
+    });
+    $$('[data-addon-del]').forEach(b => b.onclick = async () => {
+      const a = addonList().find(x => x.id === b.dataset.addonDel);
+      if (!a) return;
+      const ok = await confirmAsk({
+        title: '移除扩展', text: `把「${esc(a.name)}」从扩展菜单里删掉？`, ok: '移除', danger: true
+      });
+      if (!ok) return;
+      S.state.addons = addonList().filter(x => x.id !== a.id);
+      save(true);
+      toast('已移除');
+      renderExt();
+    });
+  }
+
+  function renderAddonPanel(host, id) {
+    const a = addonList().find(x => x.id === id);
+    if (!a) {
+      host.innerHTML = `<div class="page-head"><h1>扩展</h1></div>
+        <div class="empty">这个扩展已经不在了。</div>`;
+      return;
+    }
+    const linkMode = a.type === 'link';
+    host.innerHTML = `
+      <div class="page-head addon-head"><h1>${esc(a.name)}</h1>
+        <span class="sub">${esc(a.desc)}</span>
+        <div class="head-tools">
+          ${linkMode ? '<button class="btn sm" id="addon-visit">在浏览器打开</button>' : ''}
+          <button class="btn sm ghost" id="addon-manage">管理</button>
+        </div>
+      </div>
+      ${linkMode ? `
+        <div class="addon-link">
+          <span class="ext-ico"><svg viewBox="0 0 24 24"><path d="M10 13.6a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.3 1.3"/><path d="M14 10.4a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 0 0 5.7 5.7l1.3-1.3"/></svg></span>
+          <b>${esc(a.name)}</b>
+          <i>${esc(a.url)}</i>
+          <button class="btn primary" id="addon-visit2">打开站点</button>
+        </div>` : `
+        <div class="addon-panel">
+          <iframe id="addon-frame" title="${esc(a.name)}" sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+            srcdoc="${esc(a.html)}"></iframe>
+        </div>`}
+    `;
+    const open = () => {
+      try {
+        if (mo.openExternal) mo.openExternal(a.url);
+        else window.open(a.url, '_blank', 'noopener');
+      } catch (e) {
+        try { window.open(a.url, '_blank', 'noopener'); } catch (_) { toast('打不开这个地址'); }
+      }
+    };
+    ['#addon-visit', '#addon-visit2'].forEach(s => { const b = $(s); if (b) b.onclick = open; });
+    const mg = $('#addon-manage');
+    if (mg) mg.onclick = () => {
+      S.ext = 'addon';
+      const t = $('#tb-title');
+      if (t) t.textContent = EXT_NAME.addon;
+      renderExt();
+    };
+  }
+
+  /* 扩展面板 ↔ 宿主的唯一通道。只认这几条，别的一律忽略。 */
+  window.addEventListener('message', e => {
+    const d = e.data;
+    if (!d || typeof d !== 'object' || !d.moread) return;
+    const reply = obj => { try { e.source && e.source.postMessage(obj, '*'); } catch (_) { } };
+    if (d.moread === 'toast') { toast(String(d.text || '').slice(0, 200), 2600); return; }
+    if (d.moread === 'shelf') { setView('shelf'); return; }
+    if (d.moread === 'context') {
+      const b = R && R.book;
+      reply({
+        moread: 'context',
+        data: {
+          book: b ? { id: b.id, name: b.name, author: b.author || '', chapter: R.ci || 0 } : null,
+          chapterTitle: (R && R.title) || '',
+          theme: (S.state.settings || {}).theme || 'paper',
+          fontSize: (S.state.settings || {}).fontSize || 19,
+          count: (S.state.books || []).length
+        }
+      });
+      return;
+    }
+    if (d.moread === 'search') {
+      setView('search');
+      const kw = String(d.q || '').trim();
+      const inp = $('#search-input') || $('#quick-search');
+      if (kw && inp) { inp.value = kw; try { runSearch(kw); } catch (_) { } }
+      return;
+    }
+    if (d.moread === 'openBook' && d.id) {
+      try { openReader(String(d.id), parseInt(d.chapter, 10) || 0); } catch (_) { }
+    }
+  });
 
   /** 切换搜索方式：书源 / 网页。两边共用同一个输入框和结果区。 */
   function setSearchMode(mode) {
@@ -505,6 +855,8 @@
   }
 
   function setView(v) {
+    /* 已经停在某个扩展子页 / 面板里，再点侧栏「扩展」先回菜单，跟返回键一致 */
+    if (v === 'ext' && S.view === 'ext' && S.ext) S.ext = null;
     /* 书源 / 历史 / 统计已经收进扩展：老名字继续认，外部调用点（空书架引导、
        搜索无结果的提示、快捷键）不用跟着改 */
     if (v === 'sources' || v === 'history' || v === 'stats') { S.ext = v; v = 'ext'; }
@@ -514,7 +866,7 @@
     $$('.rail-btn').forEach(b => b.classList.toggle('active', b.dataset.view === v));
     $$('.view').forEach(el => el.classList.toggle('active', el.id === 'view-' + v));
     const names = {
-      shelf: '书架', search: '搜索', ext: S.ext ? EXT_NAME[S.ext] : '扩展',
+      shelf: '书架', search: '搜索', ext: extTitle(),
       settings: S.set ? setSecName() : '设置'
     };
     $('#tb-title').textContent = names[v] || '';
@@ -578,13 +930,24 @@
   function bindDropZone() {
     const dz = $('#dropzone');
     if (!dz) return;                 // 安卓版摘掉了拖放区
+    /* 在「扩展 → 添加扩展」页时，拖进来的是扩展清单而不是书：文案与去向都要换 */
+    const addonMode = () => S.view === 'ext' && S.ext === 'addon';
     let depth = 0;
-    window.addEventListener('dragenter', e => { e.preventDefault(); depth++; dz.classList.add('on'); });
+    window.addEventListener('dragenter', e => {
+      e.preventDefault(); depth++;
+      const label = dz.firstElementChild;
+      if (label) label.textContent = addonMode() ? '松开以导入扩展（JSON / HTML）' : '松开以导入本地书籍';
+      dz.classList.add('on');
+    });
     window.addEventListener('dragover', e => e.preventDefault());
     window.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; dz.classList.remove('on'); } });
     window.addEventListener('drop', async e => {
       e.preventDefault(); depth = 0; dz.classList.remove('on');
       const list = [...(e.dataTransfer.files || [])];
+      if (addonMode() && list.length && ADDON_EXT_RE.test(list[0].name)) {
+        importAddonFile(list[0]);
+        return;
+      }
       const files = list.map(f => f.path).filter(Boolean);   // Electron：File 带真实路径
       if (files.length) { doImport(files); return; }
       /* 浏览器里 File 没有 path：交给网页桥读进虚拟文件系统再导入 */
