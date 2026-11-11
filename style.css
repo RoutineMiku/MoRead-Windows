@@ -1235,6 +1235,25 @@ html[data-layout] .web-start-btns .btn{width:100%;}
 .ext-back:hover{background:#f2f5fa;color:var(--text);}
 #ext-body{display:flex;flex-direction:column;flex:1;min-height:0;}
 
+/* 设置也走两级：一级是一屏模块卡片（直接复用扩展卡片的样式），
+   二级只留当前模块的卡片，所以只剩一栏、宽度收一点，别让一行字拉太宽 */
+/* 设置一级菜单：卡片比扩展页宽一点，一个卡片要放下「名字 + 说明 + 状态 + 箭头」 */
+.set-menu{grid-template-columns:repeat(auto-fill,minmax(320px,1fr));max-width:1140px;}
+.set-menu .set-chev{
+  width:14px;height:14px;flex:0 0 auto;margin-left:2px;
+  stroke:#c4cad4;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;transition:.15s;
+}
+.set-menu .ext-card:hover .set-chev{stroke:var(--accent);}
+/* 状态挂在右边，副标题只给一行，别把卡片撑成两行文字 */
+.set-menu .ext-info i{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* 窄屏放不下「名字 + 说明 + 状态 + 箭头」四样：先舍状态，说明留完整 */
+@media (max-width:560px){
+  .set-menu .ext-stat{display:none;}
+  .set-menu .ext-info i{white-space:normal;}
+}
+.set-wrap.one{grid-template-columns:1fr;max-width:900px;}
+#view-settings .card[hidden]{display:none;}
+
 /* 搜索页里的网页结果：不要再套一层滚动容器和内边距（外层 .list 已经有了） */
 #search-results .wa-tools{padding:0 0 7px;}
 #search-results .wa-list{flex:0 0 auto;overflow:visible;min-height:0;padding:0 0 6px;}
@@ -1273,4 +1292,8 @@ html[data-layout] .web-start-btns .btn{width:100%;}
 html[data-layout="portrait"] .ext-grid{grid-template-columns:1fr;padding:2px 14px 24px;gap:9px;}
 html[data-layout="portrait"] .ext-card{padding:12px 13px;}
 html[data-layout="portrait"] .ext-stat{font-size:11px;}
+/* 设置二级页在手机上也别留 32px 大边，跟着卡片走 */
+html[data-layout="portrait"] .set-wrap.one{padding:2px 14px 24px;}
+html[data-layout="portrait"] .set-menu .ext-stat{font-size:10.5px;padding:2px 7px;}
+html[data-layout="portrait"] .set-menu .ext-ico{width:36px;height:36px;flex:0 0 36px;border-radius:10px;}
 html[data-layout="portrait"] .searchbox .smode{height:26px;font-size:12px;}
