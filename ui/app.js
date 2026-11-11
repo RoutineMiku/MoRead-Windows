@@ -73,6 +73,7 @@
     group: 'all',
     info: null,
     ext: null,          /* 扩展页里当前打开的子页：sources / history / stats / null（菜单） */
+    set: null,          /* 设置页里当前打开的模块：read / tts / shelf / search / data / dav / system / about / null（菜单） */
     searchMode: 'src',  /* 搜索方式：src=书源，web=网页搜书 */
     srcQ: '',
     srcG: 'all',
@@ -513,7 +514,8 @@
     $$('.rail-btn').forEach(b => b.classList.toggle('active', b.dataset.view === v));
     $$('.view').forEach(el => el.classList.toggle('active', el.id === 'view-' + v));
     const names = {
-      shelf: '书架', search: '搜索', ext: S.ext ? EXT_NAME[S.ext] : '扩展', settings: '设置'
+      shelf: '书架', search: '搜索', ext: S.ext ? EXT_NAME[S.ext] : '扩展',
+      settings: S.set ? setSecName() : '设置'
     };
     $('#tb-title').textContent = names[v] || '';
     if (v === 'shelf') renderShelf();
@@ -2687,13 +2689,66 @@
       </div>`;
   }
 
-  /* ---------------- 设置 ---------------- */
+  /* ---------------- 设置 ----------------
+   * 设置项越加越多（阅读、朗读、书架、搜索、备份、同步、关于），以前一页铺到底，
+   * 手机上要往下划十几屏才找得到「关于」。现在和「扩展」一样做两级：进设置先看
+   * 一屏模块卡片（右边挂当前状态），点进去只看那一组开关。
+   * 卡片仍然一次性渲染、事件一次性绑好，子页只是把别的卡片 hidden 掉，
+   * 所以来回切不会丢监听，改动也照旧即时生效。 */
+  const SET = [
+    {
+      k: 'read', name: '阅读', desc: '字号 · 行距 · 字体 · 翻页',
+      icon: '<path d="M4 5.6h6.4a2 2 0 0 1 2 2V19a1.9 1.9 0 0 0-1.9-1.9H4z"/><path d="M20 5.6h-6.4a2 2 0 0 0-2 2V19a1.9 1.9 0 0 1 1.9-1.9H20z"/>',
+      stat: () => { const s = S.state.settings; return `${s.fontSize}px · ${s.lineHeight.toFixed(1)} 行距`; }
+    },
+    {
+      k: 'tts', name: '朗读', desc: '音色 · 语速 · 自动下一章',
+      icon: '<path d="M4 9.6h3l4.4-3.5v11.8L7 14.4H4z"/><path d="M16 8.7a4.7 4.7 0 0 1 0 6.6"/><path d="M18.6 6.1a8.2 8.2 0 0 1 0 11.8"/>',
+      stat: () => S.state.settings.tts.autoNext ? '自动下一章' : '读完停下'
+    },
+    {
+      k: 'shelf', name: '书架', desc: '排序方式 · 封面大小',
+      icon: '<path d="M4 19h16"/><path d="M6.4 19V7.6a1.6 1.6 0 0 1 1.6-1.6h.5a1.6 1.6 0 0 1 1.6 1.6V19"/><path d="M10.6 19V6.8l3.8-1.2V19"/><path d="M14.4 19V8.6l3.9-1.2V19"/>',
+      stat: () => (SHELF_SORTS.find(o => o.k === shelfSortKey()) || SHELF_SORTS[0]).name
+    },
+    {
+      k: 'search', name: '搜索与网络', desc: '并发 · 书源数 · 代理',
+      icon: '<circle cx="11" cy="11" r="6.4"/><path d="M15.8 15.8L20 20"/>',
+      stat: () => `${S.state.settings.maxConcurrent || 2} 并发 · 搜 ${S.state.settings.searchLimit || 40} 源`
+    },
+    {
+      k: 'data', name: '数据与备份', desc: '目录 · 缓存 · 备份恢复',
+      icon: '<ellipse cx="12" cy="6.2" rx="7" ry="2.9"/><path d="M5 6.2v5.8c0 1.6 3.1 2.9 7 2.9s7-1.3 7-2.9V6.2"/><path d="M5 12v5.8c0 1.6 3.1 2.9 7 2.9s7-1.3 7-2.9V12"/>',
+      stat: () => S.info.platform === 'web' ? '浏览器存储' : (onDeviceStore() ? '设备目录' : '本机目录')
+    },
+    {
+      k: 'dav', name: '云端同步', desc: '坚果云 / WebDAV 备份',
+      icon: '<path d="M7.4 18a4 4 0 0 1-.5-7.96A5 5 0 0 1 16.7 8.6 3.7 3.7 0 0 1 17 18z"/>',
+      stat: () => {
+        const w = S.state.settings.webdav;
+        if (!(w.url && w.user && w.pass)) return '未配置';
+        return w.enabled ? (w.lastBackupAt ? '上次 ' + fmtWhen(w.lastBackupAt) : '已配置') : '已配置 · 未启用';
+      }
+    },
+    {
+      k: 'system', name: '系统', desc: IS_ANDROID ? '触屏手势 · 窗口行为' : '窗口行为 · 快捷键',
+      icon: '<path d="M4 7.2h9M17.6 7.2H20M4 16.8h3.4M11.8 16.8H20"/><circle cx="15.2" cy="7.2" r="2.1"/><circle cx="9.4" cy="16.8" r="2.1"/>',
+      stat: () => IS_ANDROID ? '触屏操作' : (S.state.settings.closeToTray ? '× 收进托盘' : '× 直接退出')
+    },
+    {
+      k: 'about', name: '关于', desc: '版本 · 开源地址 · 联系作者',
+      icon: '<circle cx="12" cy="12" r="8.2"/><path d="M12 11.2V17M12 7.6h.01"/>',
+      stat: () => 'v' + S.info.version
+    }
+  ];
+  const setSecName = () => (SET.find(e => e.k === S.set) || {}).name || '设置';
+
   function renderSettings() {
     const v = $('#view-settings');
     const s = S.state.settings;
     v.innerHTML = `<div class="page-head"><h1>设置</h1><span class="sub">改动即时生效</span></div>
       <div class="set-wrap">
-        <div class="card">
+        <div class="card" data-sec="read">
           <h3>阅读</h3>
           <div class="row"><div class="rl">默认字号</div>
             <input type="range" id="s-fs" min="15" max="30" value="${s.fontSize}" /><span class="rv" id="s-fs-v">${s.fontSize}px</span></div>
@@ -2707,9 +2762,11 @@
           <div class="row"><div class="rl">翻页方式</div>
             <div class="seg" id="s-mode"><button data-v="scroll" class="${s.pageMode === 'scroll' ? 'on' : ''}">滚动</button>
             <button data-v="paged" class="${s.pageMode === 'paged' ? 'on' : ''}">翻页</button></div></div>
+          <div class="row"><div class="rl">阅读时自动预取下一章<small>翻到章尾直接接上，弱网时少等一会儿</small></div>
+            <div class="switch ${s.autoCacheNext ? 'on' : ''}" data-set="autoCacheNext"><i></i></div></div>
         </div>
 
-        <div class="card">
+        <div class="card" data-sec="tts">
           <h3>朗读 <span class="chip">${IS_ANDROID ? '系统语音' : OS_NAME() + ' 系统语音'}</span></h3>
           <div class="row"><div class="rl">音色 / 语速 / 音调<small id="tts-cur">${esc(ttsCurrentLabel())}</small></div>
             <button class="btn sm" id="s-tts">设置</button></div>
@@ -2719,29 +2776,35 @@
             <button class="btn sm" id="s-tts-test">播放</button></div>
         </div>
 
-        <div class="card">
-          <h3>系统</h3>
-          ${IS_ANDROID ? '' : `<div class="row"><div class="rl">关闭窗口时最小化到托盘<small>开启后点 × 不会退出程序</small></div>
-            <div class="switch ${s.closeToTray ? 'on' : ''}" data-set="closeToTray"><i></i></div></div>`}
-          <div class="row"><div class="rl">搜索并发数<small>同时请求的书源数量，过大容易被限流</small></div>
-            <div class="seg" id="s-conc">${[1, 2, 3, 4, 6].map(n => `<button data-v="${n}" class="${s.maxConcurrent === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
-          <div class="row"><div class="rl">每次搜索的书源数<small>书源太多（比如几千个）时只搜一部分，优先书架用到的</small></div>
-            <div class="seg" id="s-slimit">${[20, 40, 80, 200].map(n => `<button data-v="${n}" class="${(s.searchLimit || 40) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
-          <div class="row"><div class="rl">阅读时自动预取下一章</div>
-            <div class="switch ${s.autoCacheNext ? 'on' : ''}" data-set="autoCacheNext"><i></i></div></div>
+        <div class="card" data-sec="shelf">
+          <h3>书架</h3>
           <div class="row"><div class="rl">书架排序<small>也可以直接在书架右上角切换</small></div>
             <select class="w-engine" id="s-shelf-sort">${SHELF_SORTS.map(o => `<option value="${o.k}" ${shelfSortKey() === o.k ? 'selected' : ''}>${o.name}</option>`).join('')}</select></div>
           <div class="row"><div class="rl">封面大小<small>书架上一本书占多大</small></div>
             <div class="seg" id="s-shelf-size">${SHELF_SIZES.map(o => `<button data-v="${o.k}" class="${shelfSizeKey() === o.k ? 'on' : ''}">${o.name}</button>`).join('')}</div></div>
+        </div>
+
+        <div class="card" data-sec="search">
+          <h3>搜索与网络</h3>
+          <div class="row"><div class="rl">搜索并发数<small>同时请求的书源数量，过大容易被限流</small></div>
+            <div class="seg" id="s-conc">${[1, 2, 3, 4, 6].map(n => `<button data-v="${n}" class="${s.maxConcurrent === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
+          <div class="row"><div class="rl">每次搜索的书源数<small>书源太多（比如几千个）时只搜一部分，优先书架用到的</small></div>
+            <div class="seg" id="s-slimit">${[20, 40, 80, 200].map(n => `<button data-v="${n}" class="${(s.searchLimit || 40) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
           <div class="row"><div class="rl">换源时搜索的书源数<small>越多越容易找到同名书，但更慢；书源上千时会自动提高到 48</small></div>
             <div class="seg" id="s-swlimit">${[24, 48, 96].map(n => `<button data-v="${n}" class="${([24, 48, 96].includes(s.switchLimit) ? s.switchLimit : 24) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
-          <div class="row"><div class="rl">数据目录<small>${esc(onDeviceStore() ? (S.info.dataRoot || S.info.paths.root) : S.info.paths.root)}</small></div>
-            ${IS_ANDROID ? '' : '<button class="link" id="open-dir">打开</button>'}</div>
           ${S.info.platform === 'web' ? `<div class="row"><div class="rl">书源代理地址<small>网页版默认不发起任何网络请求（数据不出设备）。填入你自部署的代理服务后可用在线书源与搜书；留空只能读本地书</small></div>
             <input class="inp" id="web-proxy" value="${esc((() => { try { const v = localStorage.getItem('moread.proxy'); if (v) return v; const m = document.querySelector('meta[name="moread-proxy"]'); return m && m.content ? new URL(m.content, location.href).href : ''; } catch (e) { return ''; } })())}" placeholder="https://你的代理地址/?url=" spellcheck="false" /></div>` : ''}
         </div>
 
-        <div class="card">
+        <div class="card" data-sec="data">
+          <h3>数据与缓存</h3>
+          <div class="row"><div class="rl">数据目录<small>${esc(onDeviceStore() ? (S.info.dataRoot || S.info.paths.root) : S.info.paths.root)}</small></div>
+            ${IS_ANDROID ? '' : '<button class="link" id="open-dir">打开</button>'}</div>
+          <div class="row"><div class="rl">缓存占用<small id="cache-size">计算中…</small></div>
+            <button class="btn sm" id="clear-cache">清理</button></div>
+        </div>
+
+        <div class="card" data-sec="data">
           <h3>备份与恢复 <span class="chip">含 Legado 格式</span></h3>
           ${S.info.platform === 'web' ? `<div class="web-note">${onDeviceStore()
             ? '书、书源、阅读进度都保存在这台机器上（' + esc(S.info.dataRoot || '服务器') + '），'
@@ -2754,11 +2817,9 @@
             <button class="btn sm" id="bk-zip-full">完整导出</button></div>
           <div class="row"><div class="rl">从备份恢复<small>墨读 zip、原版「阅读」备份 zip、或手机导出的备份 JSON（含 bookSource / bookshelf 都行，文件名不限）；书架、书源、书签一起恢复</small></div>
             <button class="btn sm" id="bk-restore">选择文件</button></div>
-          <div class="row"><div class="rl">缓存占用<small id="cache-size">计算中…</small></div>
-            <button class="btn sm" id="clear-cache">清理</button></div>
         </div>
 
-        <div class="card span2">
+        <div class="card" data-sec="dav">
           <h3>坚果云同步 <span class="chip ${(s.webdav.url && s.webdav.user && s.webdav.pass) ? 'ok' : ''}" id="dav-state">${(s.webdav.url && s.webdav.user && s.webdav.pass) ? '已配置' : '未配置'}</span></h3>
           <div class="row"><div class="rl">启用 WebDAV 同步<small>坚果云 / Nextcloud / 群晖 等标准 WebDAV 都能用</small></div>
             <div class="switch ${s.webdav.enabled ? 'on' : ''}" id="dav-enabled"><i></i></div></div>
@@ -2791,13 +2852,15 @@
           <div class="dav-list" id="dav-list"><div class="hint">点「刷新」读取云端列表</div></div>
         </div>
 
-        <div class="card">
+        <div class="card" data-sec="system">
           ${IS_ANDROID ? `<h3>触屏操作</h3>
           <div class="row"><div class="rl">进入书籍<small>全屏沉浸：顶栏底栏自动藏起，点屏幕中间唤出，几秒不碰自动再收</small></div></div>
           <div class="row"><div class="rl">轻点屏幕左右两侧<small>上一页 / 下一页，只在「翻页」模式下生效</small></div></div>
           <div class="row"><div class="rl">左右滑动<small>翻页；「滚动」模式下滑动即正常滚动正文</small></div></div>
           <div class="row"><div class="rl">长按书架封面<small>弹出「换源 / 删除」菜单</small></div></div>
-          <div class="row"><div class="rl">长按顶栏 1.2 秒<small>打开自检：桥、存储、联网、WebView 版本逐项列出</small></div></div>` : `<h3>快捷键</h3>
+          <div class="row"><div class="rl">长按顶栏 1.2 秒<small>打开自检：桥、存储、联网、WebView 版本逐项列出</small></div></div>` : `<h3>窗口与快捷键</h3>
+          <div class="row"><div class="rl">关闭窗口时最小化到托盘<small>开启后点 × 不会退出程序</small></div>
+            <div class="switch ${s.closeToTray ? 'on' : ''}" data-set="closeToTray"><i></i></div></div>
           <div class="row"><div class="rl">打开搜索</div><span><span class="kbd">Ctrl</span> + <span class="kbd">F</span></span></div>
           <div class="row"><div class="rl">导入本地书</div><span><span class="kbd">Ctrl</span> + <span class="kbd">O</span></span></div>
           <div class="row"><div class="rl">上一章 / 下一章</div><span><span class="kbd">←</span> <span class="kbd">→</span></span></div>
@@ -2807,7 +2870,7 @@
           <div class="row"><div class="rl">退出阅读</div><span class="kbd">Esc</span></div>`}
         </div>
 
-        <div class="card" style="grid-column:1/-1">
+        <div class="card" data-sec="about">
           <h3>关于</h3>
           <div class="row"><div class="rl">关于墨读<small>版本信息 · 开源地址 · 公众号 · 抖音</small></div>
             <button class="btn sm" id="open-about">查看</button></div>
@@ -2819,6 +2882,48 @@
           <div class="row"><div class="rl">备份格式<small>导出的 zip 内同时含 bookSource.json / bookshelf.json 等原版字段，原版「阅读」可直接导入</small></div></div>
         </div>
       </div>`;
+
+    /* ---- 一级：模块菜单 ---- */
+    if (!S.set) {
+      const wrap = v.querySelector('.set-wrap');
+      if (wrap) wrap.style.display = 'none';
+      const grid = document.createElement('div');
+      grid.className = 'ext-grid set-menu';
+      grid.innerHTML = SET.map(e => `<button class="ext-card" data-sec-go="${e.k}">
+          <span class="ext-ico"><svg viewBox="0 0 24 24">${e.icon}</svg></span>
+          <span class="ext-info"><b>${e.name}</b><i>${e.desc}</i></span>
+          <span class="ext-stat">${esc(e.stat())}</span>
+          <svg class="set-chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+        </button>`).join('');
+      v.appendChild(grid);
+      $$('#view-settings [data-sec-go]').forEach(b => b.onclick = () => {
+        S.set = b.dataset.secGo;
+        const t = $('#tb-title'); if (t) t.textContent = setSecName();
+        renderSettings();
+      });
+      return;
+    }
+
+    /* ---- 二级：只留这一组卡片 ---- */
+    const sec = SET.find(e => e.k === S.set) || SET[0];
+    S.set = sec.k;
+    const wrap = v.querySelector('.set-wrap');
+    if (wrap) wrap.classList.add('one');
+    $$('#view-settings .card').forEach(c => { c.hidden = c.dataset.sec !== sec.k; });
+    const h1 = v.querySelector('.page-head h1');
+    if (h1) h1.textContent = sec.name;
+    const subEl = v.querySelector('.page-head .sub');
+    if (subEl) subEl.textContent = sec.desc;
+    const back = document.createElement('button');
+    back.className = 'ext-back';
+    back.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>设置';
+    back.onclick = () => {
+      S.set = null;
+      const t = $('#tb-title'); if (t) t.textContent = '设置';
+      renderSettings();
+    };
+    const head = v.querySelector('.page-head');
+    if (head) head.insertBefore(back, head.firstChild);
 
     $('#s-fs').oninput = e => {
       s.fontSize = +e.target.value; $('#s-fs-v').textContent = s.fontSize + 'px'; applyReaderStyle(); save();
@@ -2860,7 +2965,7 @@
       $$('#s-swlimit button').forEach(x => x.classList.remove('on'));
       b.classList.add('on'); s.switchLimit = +b.dataset.v; save();
     });
-    $$('[data-set]').forEach(el => el.onclick = () => {
+    $$('#view-settings [data-set]').forEach(el => el.onclick = () => {
       const k = el.dataset.set;
       s[k] = !s[k]; el.classList.toggle('on', s[k]); save(true);
     });
@@ -2875,10 +2980,10 @@
     };
     $('#s-tts').onclick = () => ttsPanel();
     $('#s-tts-test').onclick = () => {
-      const v = ttsOrderedVoices().find(x => x.voiceURI === ttsCfg().voiceURI) || ttsOrderedVoices()[0];
+      const v2 = ttsOrderedVoices().find(x => x.voiceURI === ttsCfg().voiceURI) || ttsOrderedVoices()[0];
       const u = new SpeechSynthesisUtterance('这是墨读的朗读试听，语速和音色可以随时调整。');
-      if (v) u.voice = v;
-      u.lang = (v && v.lang) || 'zh-CN';
+      if (v2) u.voice = v2;
+      u.lang = (v2 && v2.lang) || 'zh-CN';
       u.rate = clamp(Number(ttsCfg().rate) || 1, .5, 2);
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(u);
@@ -2909,9 +3014,10 @@
     $('#dav-refresh').onclick = () => davLoadList();
     $('#dav-up-src').onclick = davUploadSources;
     $('#dav-down-src').onclick = davDownloadSources;
-    if (dav.enabled && dav.user && dav.pass) davLoadList();
+    /* 进了同步页才去读云端列表，别的模块不用为一屏看不到的列表掏网络 */
+    if (sec.k === 'dav' && dav.enabled && dav.user && dav.pass) davLoadList();
 
-    updateCacheSize();
+    if (sec.k === 'data') updateCacheSize();
   }
 
   /* ---------------- 备份 zip / Legado 恢复 ---------------- */
@@ -5173,6 +5279,8 @@
       }
       /* 扩展里的子页（书源 / 历史 / 统计）先退回扩展菜单，再退到书架 */
       if (S.view === 'ext' && S.ext) { S.ext = null; renderExt(); const t = $('#tb-title'); if (t) t.textContent = '扩展'; return true; }
+      /* 设置里的模块页（阅读 / 朗读 / 备份…）先退回设置菜单 */
+      if (S.view === 'settings' && S.set) { S.set = null; renderSettings(); const t = $('#tb-title'); if (t) t.textContent = '设置'; return true; }
       /* 网页搜书里点进某个站之后，返回应当退回搜索结果那一页 */
       if (S.view === 'search' && S.searchMode === 'web' && WA.stack.length) {
         const wb = $('#wa-back');
@@ -5196,6 +5304,8 @@
         if (/\.zip$/i.test(p.name || '')) {
           const r = await mo.testImportZip(p.path);
           if (!r.ok) return toast(r.error || '无法识别这个备份');
+          /* 直接落到「数据与备份」那一页，别让用户在设置菜单里再找一遍 */
+          S.set = 'data';
           setView('settings');
           showRestoreConfirm(r);
         } else if (/\.json$/i.test(p.name || '')) {
