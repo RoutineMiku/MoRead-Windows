@@ -23,6 +23,9 @@ function defaults() {
     bookmarks: [],
     history: [],
     stats: {},
+    /* 用户导入的扩展（HTML 面板 / 站点入口）：跟着 data.json 走，
+       备份、换设备一起带走，不占额外目录 */
+    addons: [],
     settings: {
       fontSize: 19,
       /* 1.7 接近纸书；旧版默认 2.0 太散，一屏少看四五列字（typoV2 迁移见 ui/app.js） */

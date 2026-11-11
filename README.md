@@ -7,7 +7,7 @@
 > 存档格式与原版「阅读」双向兼容，可以直接导入原版「阅读」导出的 zip 备份。
 > 同一套 `ui/` 跑在七个地方：Windows / Linux / macOS / Android / 浏览器 / 鸿蒙 / iOS。
 
-**下载**（全平台产物都在 [Releases · v0.6.11](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.11)，各平台同一套 `ui/`）：
+**下载**（最新是 [Releases · v0.6.12](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.12)；Windows x64 / Android 7+ / Linux x64 / Linux arm64 / macOS Intel / macOS Apple Silicon / 鸿蒙 NEXT (5.0) / iOS 15+ 仍是旧版本（本期没有重出），链接指向旧标签，能用但功能落后）：
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
@@ -121,11 +121,18 @@ DATA_DIR=./data STATIC_DIR=./dist-web PORT=8080 node server/gateway.js
 - EPUB 里的图片三种写法都认：普通 `<img>`、calibre 打包的 `<svg><image xlink:href="cover.jpeg"/></svg>` 外壳、
   以及矢量 `<svg>` 折线图。calibre 转出来的那种 svg 外壳，图片地址会被读出来重新内嵌 —— 以前这类插图是一片空白
 
-### 扩展（书源 / 阅读历史 / 阅读统计）
+### 扩展（书源 / 阅读历史 / 阅读统计 / 添加扩展）
 侧栏只留 **书架 / 扩展 / 设置** 三个入口，其余功能都收进「扩展」：
 - 进去是三个卡片（书源 · N 个、历史 · N 条、统计 · 今天读了多少），点进去就是原来的整页功能，左上角「← 扩展」退回菜单
 - 以后加新功能（比如订阅、字典、自定义主题）都在这里挂一张卡，不用再往侧栏挤
 - 手机竖屏同样是一列卡片，返回键先回扩展菜单再回书架
+
+**添加扩展**（菜单最后一张虚线卡）是给开发者留的口子：
+- 打开就是一页教程：扩展格式、三步流程、面板能用的宿主接口，页内还能一键「填入示例」直接跑起来
+- 导入方式三种：把 `.json` / `.html` 拖进窗口、粘贴内容后点「导入」、点「选文件」挑一个（手机上是系统文件选择器）
+- 导入成功后扩展菜单立刻多一张卡，点开就是面板；「已安装」里可以打开 / 移除，同名再导入会问一次覆盖
+- 面板是 sandbox iframe，读不到书库和存档，需要数据就走 `postMessage`（`toast` / `context` / `search` / `openBook` / `shelf`）
+- 扩展跟着 `data.json` 存，备份、换设备、导出恢复都一起带走；分发给别人只要给那一个 JSON 文件
 
 ### 设置（同样是两级）
 设置项越加越多，一页铺到底手机上要划十几屏，所以也拆成了模块入口：

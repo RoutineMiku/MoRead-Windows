@@ -1235,6 +1235,82 @@ html[data-layout] .web-start-btns .btn{width:100%;}
 .ext-back:hover{background:#f2f5fa;color:var(--text);}
 #ext-body{display:flex;flex-direction:column;flex:1;min-height:0;}
 
+/* ------------- 扩展：添加扩展（导入 / 教程 / 面板） ------------- */
+/* 菜单最后一张用虚线框，跟上面几个内置功能区分开：这是「入口」不是「功能」 */
+.ext-card.addon-add{border-style:dashed;background:rgba(255,255,255,.62);box-shadow:none;}
+.ext-card.addon-add:hover{background:#fff;border-color:#c3d5f2;box-shadow:var(--shadow-md);}
+.ext-card.addon-add .ext-ico{background:#eef3fb;color:var(--accent);}
+
+.addon-drop{
+  display:flex;flex-direction:column;gap:3px;align-items:center;justify-content:center;text-align:center;
+  padding:16px;margin-bottom:10px;border:1.5px dashed #cfd8e6;border-radius:11px;
+  background:#f8fafd;cursor:pointer;transition:.15s;
+}
+.addon-drop:hover{border-color:#a9c2e8;background:#f2f7fe;}
+.addon-drop b{font-size:13px;font-weight:600;}
+.addon-drop span{font-size:11.5px;color:var(--faint);}
+
+.addon-text{
+  width:100%;height:132px;resize:vertical;padding:10px 12px;border-radius:10px;
+  border:1px solid var(--line);background:#fbfcfd;line-height:1.55;user-select:text;
+  font-family:ui-monospace,Consolas,"Courier New",monospace;font-size:13px;color:var(--text);
+}
+.addon-text:focus{outline:none;border-color:#b9cdee;background:#fff;box-shadow:0 0 0 3px rgba(43,108,224,.08);}
+.addon-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;}
+.btn.ghost{background:transparent;border-color:transparent;box-shadow:none;color:var(--muted);}
+.btn.ghost:hover{background:#f1f4f9;border-color:transparent;color:var(--text);}
+.addon-tip{margin:10px 0 0;font-size:11.5px;line-height:1.75;color:var(--faint);}
+.addon-tip code,.addon-steps code{
+  font-family:ui-monospace,Consolas,monospace;font-size:11px;background:#f2f5fa;
+  border-radius:5px;padding:1px 5px;color:#455066;
+}
+.addon-steps{margin:0 0 11px;padding-left:18px;font-size:12.5px;line-height:1.85;color:#4a5464;}
+.addon-steps li{margin-bottom:2px;}
+.addon-steps b{color:var(--text);font-weight:600;}
+.addon-code{
+  margin:0;padding:11px 13px;border-radius:10px;background:#f6f8fb;border:1px solid #eceff5;
+  font-family:ui-monospace,Consolas,"Courier New",monospace;font-size:11.5px;line-height:1.7;
+  color:#3f4a5c;overflow:auto;white-space:pre;user-select:text;
+}
+
+.addon-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dashed #f0f2f5;}
+.addon-row:last-child{border-bottom:none;}
+.addon-row-ico{
+  width:30px;height:30px;flex:0 0 30px;border-radius:9px;display:grid;place-items:center;
+  background:#eef3fb;color:var(--accent);
+}
+.addon-row-ico svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;}
+.addon-row .rl{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.addon-row .rl b{font-size:13px;font-weight:600;}
+.addon-row .rl i{font-style:normal;font-size:11.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+/* 面板本身：iframe 高度跟着窗口走，别让内容把自己撑成 0 */
+.addon-panel{padding:0 32px 24px;}
+.addon-panel iframe{
+  width:100%;height:calc(100vh - 210px);min-height:420px;display:block;
+  border:1px solid var(--line);border-radius:13px;background:#fff;box-shadow:var(--shadow-sm);
+}
+/* 站点入口不塞 iframe：多数站点会拒绝被嵌，给张卡直接跳浏览器更靠谱 */
+.addon-link{
+  margin:6px auto;max-width:620px;padding:28px;border-radius:14px;background:#fff;border:1px solid var(--line);
+  box-shadow:var(--shadow-sm);display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;
+}
+.addon-link .ext-ico{width:52px;height:52px;flex:0 0 52px;border-radius:15px;}
+.addon-link .ext-ico svg{width:26px;height:26px;}
+.addon-link b{font-size:15px;}
+.addon-link i{font-style:normal;font-size:11.5px;color:var(--faint);word-break:break-all;}
+.addon-link .btn{margin-top:6px;}
+html[data-layout="portrait"] .addon-panel{padding:0 14px 18px;}
+html[data-layout="portrait"] .addon-panel iframe{height:calc(100vh - 250px);min-height:380px;}
+html[data-layout="portrait"] .addon-link{margin:6px 14px;padding:22px 18px;}
+/* 面板页的标题行：竖屏下「管理」要跟返回键同一行，说明另起一行，
+   否则 head-tools 的 width:100% 会把它单独顶成一行，白占一层高度 */
+html[data-layout="portrait"] .page-head.addon-head{gap:6px 8px;}
+html[data-layout="portrait"] .page-head.addon-head .head-tools{
+  order:2;width:auto;flex:0 0 auto;margin-left:auto;
+}
+html[data-layout="portrait"] .page-head.addon-head .sub{flex:1 1 100%;order:9;}
+
 /* 设置也走两级：一级是一屏模块卡片（直接复用扩展卡片的样式），
    二级只留当前模块的卡片，所以只剩一栏、宽度收一点，别让一行字拉太宽 */
 /* 设置一级菜单：卡片比扩展页宽一点，一个卡片要放下「名字 + 说明 + 状态 + 箭头」 */
@@ -1251,7 +1327,12 @@ html[data-layout] .web-start-btns .btn{width:100%;}
   .set-menu .ext-stat{display:none;}
   .set-menu .ext-info i{white-space:normal;}
 }
-.set-wrap.one{grid-template-columns:1fr;max-width:900px;}
+.set-wrap.one{grid-template-columns:1fr;max-width:900px;width:100%;margin:0 auto;}
+/* grid 子项默认 min-width:auto：里面有一段 white-space:pre 的代码块时，
+   整列会被撑到比窗口还宽，右侧文字就被 .view 的 overflow:hidden 裁掉。
+   卡片允许收缩，代码块自己出横向滚动条。 */
+.set-wrap.one > .card{min-width:0;}
+.addon-code{max-width:100%;}
 #view-settings .card[hidden]{display:none;}
 
 /* 搜索页里的网页结果：不要再套一层滚动容器和内边距（外层 .list 已经有了） */
