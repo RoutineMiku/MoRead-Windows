@@ -211,6 +211,29 @@
     toastTimer = setTimeout(() => t.classList.remove('on'), ms || 2400);
   }
 
+  /* 复制到剪贴板：file:// 下的 Electron / 老 WebView 没有 navigator.clipboard，
+     退回「选中 + execCommand」这条老路，两条都失败就返回 false 让调用方改提示。 */
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) { /* 继续走兜底 */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', 'readonly');
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return !!ok;
+    } catch (e) { return false; }
+  }
+
   function openModal(html, wide) {
     const box = $('#modal-box');
     box.className = 'modal' + (wide ? ' wide' : '');
@@ -749,7 +772,7 @@
         <div class="hero-body">
           <div class="kicker">继 续 阅 读</div>
           <h2>${esc(heroBook.name)}</h2>
-          <div class="meta">${esc(heroBook.author || '佚名')} · ${heroBook.kind === 'local' ? '本地书' : esc(heroBook.sourceName || '在线')} · 共 ${heroBook.total || '?'} 章</div>
+          <div class="meta">${esc(heroBook.author || '佚名')} · ${heroBook.kind === 'local' ? '本地书' : esc(heroBook.sourceName || '在线')} · 共 ${bodyChapterCount(heroBook) || '?'} 章</div>
           <div class="prog"><i style="width:${pct}%"></i></div>
           <div class="prog-txt">${p ? '读到 ' + esc(p.title || '') + ' · ' + pct + '%' : '尚未开始'}</div>
           <div class="hero-actions">
@@ -882,7 +905,7 @@
     const groups = S.state.groups;
     const cur = b.groupId || 'g_default';
     openModal(`<h3>${esc(b.name)}</h3>
-      <p class="desc">${esc(b.author || '佚名')} · ${b.kind === 'local' ? '本地书' : '在线书 · ' + esc(b.sourceName || '')} · ${b.total || 0} 章
+      <p class="desc">${esc(b.author || '佚名')} · ${b.kind === 'local' ? '本地书' : '在线书 · ' + esc(b.sourceName || '')} · ${bodyChapterCount(b)} 章
       ${b.intro ? '<br>' + esc(b.intro.slice(0, 120)) : ''}</p>
       <div class="form-grid">
         <div class="field"><label>归入分组</label>
@@ -2786,7 +2809,7 @@
 
         <div class="card" style="grid-column:1/-1">
           <h3>关于</h3>
-          <div class="row"><div class="rl">关于墨读<small>版本信息 · 开源地址 · 公众号</small></div>
+          <div class="row"><div class="rl">关于墨读<small>版本信息 · 开源地址 · 公众号 · 抖音</small></div>
             <button class="btn sm" id="open-about">查看</button></div>
           <div class="row"><div class="rl">版本<small>${IS_ANDROID ? `墨读 ${esc(S.info.version)} · Android` : (S.info.platform === 'web' ? `墨读 ${esc(S.info.version)} · 网页版` : (S.info.platform === 'ios' || S.info.platform === 'harmony') ? `墨读 ${esc(S.info.version)} · ${OS_NAME()}` : `墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}`)}</small></div>
             <span class="rv">${IS_ANDROID ? '数据只存本机' : (S.info.portable ? '便携模式 · 数据在程序目录' : '数据只存本地')}</span></div>
@@ -3678,7 +3701,7 @@
       sec.dataset.ci = idx;
       sec.dataset.title = title;
       sec.dataset.chars = paras.reduce((n, p) => n + (isImgPara(p) ? 0 : p.length), 0);
-      sec.innerHTML = `<div class="ch-no">${esc(b.name)} · 共 ${total} 章</div><h2>${esc(title)}</h2>` +
+      sec.innerHTML = `<div class="ch-no">${esc(b.name)} · 共 ${bodyChapterCount(b) || total} 章</div><h2>${esc(title)}</h2>` +
         `<div class="body">${parasMap(paras, imgMaxH())}</div>` + (last ? pageTailHtml() : '');
       page.appendChild(sec);
       R.buf.push(idx);
@@ -4147,14 +4170,65 @@
     });
   }
 
+  /* ---------------- 目录：哪些算「章」，哪些不算 ----------------
+     出版社做的 epub 里，卷首的封面 / 版权页 / 目录页，以及前言、序、附录、后记、致谢
+     在 spine 里和正文章节长得一模一样。以前它们全被算进「共 N 章」，一本书 40 章能
+     显示成 47 章，目录里的序号也跟着错位（看着是第 3 章，点进去是版权页后面那章）。
+     现在分三类：
+       · 封面 / 版权页 / 目录页 —— 目录里直接不列（没人要读它们）
+       · 前言 / 序 / 附录 / 后记 / 致谢 —— 归到「卷首 · 附录」一组，不计入章节数
+       · 其余 —— 正文章节，按 1..N 连续编号
+     判定只看标题（不碰正文索引），所以 data-ci 仍是原始下标，点击、进度、书签都对得上。 */
+  const TOC_JUNK_RE = /^(?:封面|封底|护封|书脊|书名页|扉页|版权页?|版权信息|版权声明|目录|目\s*录|contents|table of contents|cover|front cover|back cover|title\s*page|copyright|colophon)$/i;
+  const TOC_EXTRA_RE = /^(?:前言|序言|序|自序|代序|总序|推荐序|译者序|编者序|引言|引子|导言|导论|作者的话|作者引言|作者序|编者的话|译者的话|内容简介|内容提要|本书简介|作者简介|关于作者|后记|编后记|译后记|跋|附录.*|致谢|参考文献|参考书目|注释|注释表|插图|插图目录|名人推荐|媒体推荐|完本感言|完结感言|上架感言|作者感言|写在前面|写在最后|感言|foreword|preface|introduction|afterword|appendix\w*|acknowledg\w*|bibliography|notes|about the author|praise)$/i;
+
+  const tocTitleOf = c => (typeof c === 'string' ? c : (c && c.title) || '');
+  /** 去掉「第 3 章」「3.」「（一）」这类前缀，只留称呼本身再比对 */
+  function tocKey(title) {
+    return String(title || '')
+      .replace(/^[\s　]+|[\s　]+$/g, '')
+      .replace(/^第[零一二三四五六七八九十百千两0-9]{1,9}[章节回卷篇集][\s:：.、·-]*/i, '')
+      .replace(/^[(（\[【]?\d{1,4}[)）\]】.、:：\s]+/, '')
+      .replace(/[\s:：.、·-]+$/, '');
+  }
+  const isJunkTitle = t => TOC_JUNK_RE.test(tocKey(t));
+  const isExtraTitle = t => !isJunkTitle(t) && TOC_EXTRA_RE.test(tocKey(t));
+  /** 书架/详情页显示「共 N 章」时用这个：不含前言附录，也不含封面版权页 */
+  function bodyChapterCount(b) {
+    const list = (b && b.chapters) || [];
+    if (!list.length) return (b && b.total) || 0;
+    let n = 0;
+    for (let i = 0; i < list.length; i++) if (!isJunkTitle(tocTitleOf(list[i])) && !isExtraTitle(tocTitleOf(list[i]))) n++;
+    return n || (b && b.total) || 0;
+  }
+
   function buildToc() {
     const b = R.book;
     const list = b.chapters || [];
-    $('#toc-count').textContent = `共 ${list.length} 章`;
-    $('#toc-list').innerHTML = list.map((c, i) => {
-      const title = typeof c === 'string' ? c : c.title;
-      return `<div class="toc-item ${i === R.ci ? 'on' : ''}" data-ci="${i}"><span>${i + 1}</span>${esc(title)}</div>`;
-    }).join('');
+    const extra = [], body = [];
+    list.forEach((c, i) => {
+      const t = tocTitleOf(c);
+      if (isJunkTitle(t)) return;                       // 封面 / 版权 / 目录页：不列
+      (isExtraTitle(t) ? extra : body).push({ i, t });
+    });
+    /* 整本都是前言附录的（散文集、只抓了一篇的书）就别分组了，否则正文组是空的 */
+    const split = extra.length > 0 && body.length > 0;
+    const row = (it, n) => `<div class="toc-item ${it.i === R.ci ? 'on' : ''}" data-ci="${it.i}">`
+      + `<span class="${n ? '' : 'dot'}">${n || '·'}</span>${esc(it.t)}</div>`;
+
+    let html = '';
+    if (split) {
+      html += `<div class="toc-group">卷首 · 附录<em>${extra.length} 篇</em></div>`;
+      html += extra.map(it => row(it, 0)).join('');
+      html += `<div class="toc-group">正文<em>${body.length} 章</em></div>`;
+      html += body.map((it, k) => row(it, k + 1)).join('');
+      $('#toc-count').textContent = `共 ${body.length} 章 · 另有卷首附录 ${extra.length} 篇`;
+    } else {
+      const all = body.concat(extra).sort((a, c) => a.i - c.i);
+      html = all.map((it, k) => row(it, k + 1)).join('');
+      $('#toc-count').textContent = `共 ${all.length} 章`;
+    }
+    $('#toc-list').innerHTML = html;
     R.tocOn = null;                       // 列表重建了，旧的「当前项」引用作废
     $$('#toc-list .toc-item').forEach(el => el.onclick = () => {
       R.page = 0;
@@ -4334,9 +4408,11 @@
     setTimeout(speakNext, 60);
   }
 
-  /* 关于我们：版本、开源地址、公众号二维码。
+  /* 关于我们：版本、开源地址、公众号二维码、作者抖音。
      三端共用这一个弹窗，图片走相对路径（ui/ 与 dist-web 里各放一份）。 */
   const GITHUB_URL = 'https://github.com/RoutineMiku/MoRead-Windows';
+  const DOUYIN_URL = 'https://v.douyin.com/9TIIxVCANig/';
+  const DOUYIN_ID = 'RoutineMiku';
   function aboutPanel() {
     const plat = OS_NAME();
     openModal(`<div class="about">
@@ -4352,10 +4428,23 @@
         <img src="gzh-qr.jpg" alt="公众号二维码" />
         <span>微信扫码关注公众号<br /><small>版本更新与书源分享都在这里</small></span>
       </div>
+      <div class="about-qr dy" id="ab-dy" role="button" tabindex="0" title="点一下复制抖音主页链接">
+        <img src="douyin-qr.png" alt="抖音码" />
+        <span>抖音扫码找我 · 联系作者<br /><small>抖音号 ${DOUYIN_ID} · 点这里复制主页链接<br />日常 MIKU，更新和使用问题都能直接说</small></span>
+      </div>
       <div class="about-by">powered by <b>routinemiku</b></div>
     </div>
     <div class="modal-actions"><button class="btn primary" id="ab-ok">知道了</button></div>`);
     $('#ab-ok').onclick = closeModal;
+    const dy = $('#ab-dy');
+    const copy = async () => {
+      const ok = await copyText(DOUYIN_URL);
+      toast(ok ? '抖音链接已复制，粘到抖音里就能打开' : '复制没成功，抖音号是 ' + DOUYIN_ID, 3000);
+    };
+    if (dy) {
+      dy.onclick = copy;
+      dy.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copy(); } };
+    }
   }
 
   /* 阅读器里的「Aa」排版面板：字号 / 行距 / 段距 / 字体 / 翻页方式 / 主题。

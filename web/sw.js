@@ -16,6 +16,7 @@ const ASSETS = [
   './icon-192.png',
   './icon-512.png',
   './gzh-qr.jpg',
+  './douyin-qr.png',
   './logo.png'
 ];
 

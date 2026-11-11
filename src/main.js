@@ -176,7 +176,8 @@ function bookCacheDir(id) {
 }
 function parsedPath(id) {
   // v2：EPUB 图片支持上线后解析结果含 data URL 图片段，换名让老书重新解析一次
-  return path.join(bookCacheDir(id), 'parsed.v2.json');
+  // v3：跳过纯图片页（封面等），章节数与目录对得上，老书需要重新解析一次
+  return path.join(bookCacheDir(id), 'parsed.v3.json');
 }
 
 function loadParsed(book) {

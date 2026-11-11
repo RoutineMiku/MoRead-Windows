@@ -306,6 +306,9 @@ function parseEpub(buf) {
     }
     const paras = htmlToParas(html, makeResolver(item.href));
     if (!paras.length) return;
+    /* 纯图片页（封面、扉页插图、插图占位页）不算章节：它们的标题往往就是书名，
+       留着会让目录第一项叫「某某书」、章节数也跟着多一章。 */
+    if (!paras.some(p => !/^data:image\//.test(p))) return;
     chapters.push({ title: (t || '第 ' + (chapters.length + 1) + ' 节').slice(0, 60), text: paras });
   });
 
