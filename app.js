@@ -13,7 +13,58 @@
   const onDeviceStore = () => !!(S.info && S.info.platform === 'web' && S.info.dataStore === 'device');
   /* 浏览器里跑的版本（手机/电脑都算）：没有"文件路径"、没有拖放，交互要更明确一些 */
   const IS_WEB = !!(window.MoNativeBridge && window.MoNativeBridge.__isWeb);
+  /* 当前系统名（关于页 / 设置页展示用）：S.info.platform 由各端桥接层给 */
+  const OS_NAME = () => {
+    const p = (S.info && S.info.platform) || '';
+    if (IS_ANDROID) return 'Android';
+    return p === 'web' ? '网页版'
+      : p === 'darwin' ? 'macOS'
+      : p === 'linux' ? 'Linux'
+      : p === 'harmony' ? '鸿蒙'
+      : p === 'ios' ? 'iOS'
+      : 'Windows';
+  };
   const layoutMode = () => document.documentElement.getAttribute('data-layout') || '';
+
+  /* ---------------- 网络：带短缓存的 GET ----------------
+   * 网页书「预览 → 试读 → 加入书架」会把同一页反复抓三遍，每遍都是几百毫秒的往返；
+   * 换章来回翻也是。这里按地址缓存 90 秒（只缓存成功的 GET，24MB 上限，LRU 淘汰），
+   * 同一页只走一次网络。binary / POST 一律不缓存。 */
+  const NET_CACHE = { map: new Map(), bytes: 0, ttl: 90 * 1000, max: 24 * 1024 * 1024 };
+  function netGet(opts) {
+    const o = opts || {};
+    const cacheable = !o.binary && !o.method && !o.noCache && /^https?:/i.test(o.url || '');
+    if (!cacheable) return mo.net(o);
+    const key = o.url;
+    const hit = NET_CACHE.map.get(key);
+    if (hit && Date.now() - hit.at < NET_CACHE.ttl) {
+      NET_CACHE.map.delete(key);
+      NET_CACHE.map.set(key, hit);
+      return Promise.resolve(Object.assign({}, hit.res, { cached: true }));
+    }
+    return mo.net(o).then(res => {
+      if (res && res.ok !== false && typeof res.text === 'string') {
+        const size = (res.text.length + 64) * 2;
+        if (size < 4 * 1024 * 1024) {
+          if (NET_CACHE.map.has(key)) {
+            const old = NET_CACHE.map.get(key);
+            NET_CACHE.bytes -= (old.res.text.length + 64) * 2;
+            NET_CACHE.map.delete(key);
+          }
+          NET_CACHE.map.set(key, { at: Date.now(), res });
+          NET_CACHE.bytes += size;
+          while (NET_CACHE.bytes > NET_CACHE.max && NET_CACHE.map.size > 1) {
+            const k = NET_CACHE.map.keys().next().value;
+            const v = NET_CACHE.map.get(k);
+            NET_CACHE.map.delete(k);
+            NET_CACHE.bytes -= (v.res.text.length + 64) * 2;
+          }
+        }
+      }
+      return res;
+    });
+  }
+  const netClear = () => { NET_CACHE.map.clear(); NET_CACHE.bytes = 0; };
 
   const S = {
     state: null,
@@ -21,6 +72,8 @@
     filter: 'all',
     group: 'all',
     info: null,
+    ext: null,          /* 扩展页里当前打开的子页：sources / history / stats / null（菜单） */
+    searchMode: 'src',  /* 搜索方式：src=书源，web=网页搜书 */
     srcQ: '',
     srcG: 'all',
     srcE: 'all',
@@ -37,13 +90,20 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   /* EPUB 图片段：解析层把 <img> 转成 data URL 整段占位（见 src/parse.js）。
      这里负责识别与渲染；data URL 校验过结构才进 DOM，防止构造的书往里塞别的东西。 */
-  const IMG_RE = /^data:image\/(?:png|jpe?g|gif|webp|bmp|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
-  const isImgPara = p => typeof p === 'string' && p.length > 32 && p.charCodeAt(4) === 58 /* 'data:' */ && IMG_RE.test(p);
+  const IMG_RE = /^data:image\/(?:png|jpe?g|gif|webp|bmp|svg\+xml|avif);base64,[A-Za-z0-9+/=]+$/;
+  /* 远程图（漫画）：引擎先给出 @img:<地址>，下载成 data URL 后再按普通图片段落渲染。
+     为什么不直接 <img src="远程">：漫画站普遍校验 Referer，直连会被换成防盗链占位图。 */
+  const REMOTE_IMG = '@img:';
+  const isRemoteImg = p => typeof p === 'string' && p.indexOf(REMOTE_IMG) === 0;
+  const isImgPara = p => typeof p === 'string'
+    && ((p.length > 32 && p.charCodeAt(4) === 58 /* 'data:' */ && IMG_RE.test(p)) || isRemoteImg(p));
   /* 图片限高：单图最高占阅读区 62%，保证「空页也放得下」，分页器就不会卡在
      「一段永远装不下」的死局里。具体数值在分页/渲染时算好传进来。 */
   const imgMaxH = () => {
     const st = $('#r-stage');
-    return Math.max(120, Math.round((st ? st.clientHeight : 600) * 0.62));
+    const h = st ? st.clientHeight : 600;
+    /* 漫画：一屏一张，别留半页空白；正文插图仍然只占 62% */
+    return Math.max(120, Math.round(h * (R && R.comic ? 0.96 : 0.62)));
   };
   const imgHtml = (p, maxH) => `<img class="r-img" style="max-height:${maxH}px" src="${p}" alt="">`;
   const parasMap = (paras, maxH) => paras.map(p => isImgPara(p) ? imgHtml(p, maxH) : `<p>${esc(p)}</p>`).join('');
@@ -65,6 +125,36 @@
     }
     return Promise.all(jobs);
   }
+
+  /* ---------------- 漫画：远程图 → data URL ----------------
+   * 并发 4 张、单张 8MB 上限，整章最多 60 张。抓不到的图直接去掉，
+   * 不能让一张 404 把整章卡住（漫画站换域名很频繁）。 */
+  async function resolveImgs(paras, src) {
+    if (!paras || !paras.length) return paras;
+    const targets = [];
+    for (let i = 0; i < paras.length; i++) if (isRemoteImg(paras[i])) targets.push(i);
+    if (!targets.length) return paras;
+    const out = paras.slice();
+    const max = Math.min(targets.length, 60);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < max) {
+        const idx = targets[cursor++];
+        const url = out[idx].slice(REMOTE_IMG.length);
+        try {
+          const r = await netGet({ url, binary: true, headers: (src && src.headers) || undefined, timeout: 15000 });
+          if (!r || !r.ok || !r.b64) throw new Error((r && r.error) || 'no data');
+          const mime = /^image\//.test(r.mime || '') ? r.mime : 'image/jpeg';
+          out[idx] = `data:${mime};base64,${r.b64}`;
+        } catch (e) {
+          out[idx] = '';   /* 标记为空，下面统一过滤 */
+        }
+      }
+    };
+    /* 漫画一话几十张图：并发 6 比 4 快三成，再高容易被图片站限流 */
+    await Promise.all(Array.from({ length: Math.min(6, max) }, worker));
+    return out.filter(p => p !== '');
+  }
   const uid = p => (p || 'X') + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   /* 网络请求取消不了，但不必一直等：超时就放弃这个源，继续下一个 */
@@ -72,6 +162,18 @@
     Promise.resolve(p),
     new Promise((_, rej) => setTimeout(() => rej(new Error('超时')), ms))
   ]);
+
+  /** 换源要用的干净关键词：书名号、后缀（全本 / 完本 / 精校）会让站点搜不到 */
+  const cleanSearchKw = name => {
+    const raw = String(name || '').replace(/\s+/g, ' ').trim();
+    const s = raw
+      .replace(/[《》「」『』【】\[\]（）()]/g, ' ')
+      .replace(/[（(][^)）]{0,8}(全本|完本|连载|免费|精校|校对|TXT|txt)[^)）]{0,8}[)）]/g, ' ')
+      .replace(/\s*[-_|｜]\s*(全本|完本|连载|免费|精校|校对).*$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return s || raw;
+  };
 
   function gradOf(name) {
     let h = 0;
@@ -166,6 +268,7 @@
   async function boot() {
     S.info = await mo.info();
     S.state = await mo.state.get();
+    S.searchMode = (S.state.settings && S.state.settings.searchMode) === 'web' ? 'web' : 'src';
     try { migrateTypo(); } catch (e) { console.error('排版迁移失败：', e); }
     applySettings();
     // 同样逐个隔离：绑定阶段任何一步挂掉都只丢它自己，不影响导航和其它功能
@@ -177,7 +280,7 @@
     try {
       const dh = $('.drop-hint');
       if (dh && isAndroidApp()) {
-        dh.innerHTML = '点右上角 <b>导入</b> 选择 txt / epub 文件；在线书在「书源」里搜索后加入书架';
+        dh.innerHTML = '点右上角 <b>导入</b> 选择 txt / epub 文件；在线书用右上角的搜索按钮搜到后加进书架';
       }
     } catch (e) { /* 文案改不了不影响功能 */ }
 
@@ -251,12 +354,18 @@
       if (e.target.closest('button')) return;
       mo.win.maximize();
     });
-    $('#btn-search').onclick = () => { setView('search'); setTimeout(() => $('#search-input')?.focus(), 60); };
-    $('#btn-import').onclick = importBooks;
-    $('#btn-import2').onclick = importBooks;
+    on('#btn-search', () => { setView('search'); setTimeout(() => $('#search-input')?.focus(), 60); });
+    on('#btn-import', importBooks);
+    on('#btn-import2', importBooks);
 
+    /* 书架搜索框：左边下拉选「书源 / 网页」，回车按当前方式搜 */
+    const qm = $('#quick-mode');
+    if (qm) {
+      qm.value = S.searchMode;
+      qm.onchange = () => setSearchMode(qm.value);
+    }
     const q = $('#quick-search');
-    q.addEventListener('keydown', e => {
+    if (q) q.addEventListener('keydown', e => {
       if (e.key !== 'Enter') return;
       const kw = q.value.trim();
       if (!kw) return;
@@ -282,19 +391,111 @@
     $$('.rail-btn').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
   }
 
+  /* ---------------- 扩展 ----------------
+   * 书源 / 阅读历史 / 阅读统计原来各占一个侧栏入口，加上书架、网页、书签、设置
+   * 一共七个，手机上挤成一排小图标。现在它们统一收进「扩展」，侧栏只留
+   * 书架 / 扩展 / 设置三个大按钮；以后再加功能（比如词典、同步）也往这里挂，
+   * 不用再动侧栏。 */
+  const EXT = [
+    {
+      k: 'sources', name: '书源', desc: '导入、编辑、检测 Legado 书源',
+      icon: '<circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4M12 3.8c2.2 2.3 3.3 5.1 3.3 8.2S14.2 17.9 12 20.2c-2.2-2.3-3.3-5.1-3.3-8.2S9.8 6.1 12 3.8z"/>',
+      stat: () => {
+        const n = S.state.sources.length, on = S.state.sources.filter(s => s.enabled).length;
+        return n ? `${n} 个 · ${on} 个启用` : '还没有书源';
+      }
+    },
+    {
+      k: 'history', name: '阅读历史', desc: '按天回看读到哪一章',
+      icon: '<circle cx="12" cy="12" r="8.2"/><path d="M12 7.5V12l3 1.8"/>',
+      stat: () => S.state.history.length ? `${S.state.history.length} 条记录` : '暂无记录'
+    },
+    {
+      k: 'stats', name: '阅读统计', desc: '每天读了多久、多少字',
+      icon: '<path d="M5 19V9M12 19V5M19 19v-6"/>',
+      stat: () => {
+        const s = (S.state.stats || {})[dayKey()] || { sec: 0 };
+        return s.sec ? `今天 ${fmtDur(s.sec)}` : '今天还没读';
+      }
+    }
+  ];
+  const EXT_NAME = { sources: '书源', history: '阅读历史', stats: '阅读统计' };
+
+  function renderExt() {
+    const v = $('#view-ext');
+    if (!v) return;
+    if (!S.ext) {
+      v.innerHTML = `
+        <div class="page-head"><h1>扩展</h1><span class="sub">书源、历史、统计都在这里，以后的新功能也往这儿加</span></div>
+        <div class="ext-grid">
+          ${EXT.map(e => `<button class="ext-card" data-ext="${e.k}">
+            <span class="ext-ico"><svg viewBox="0 0 24 24">${e.icon}</svg></span>
+            <span class="ext-info"><b>${e.name}</b><i>${e.desc}</i></span>
+            <span class="ext-stat">${esc(e.stat())}</span>
+          </button>`).join('')}
+        </div>`;
+      $$('#view-ext [data-ext]').forEach(b => b.onclick = () => {
+        S.ext = b.dataset.ext;
+        const t = $('#tb-title');
+        if (t) t.textContent = EXT_NAME[S.ext] || '扩展';
+        renderExt();
+      });
+      return;
+    }
+    v.innerHTML = `<div id="ext-body"></div>`;
+    const host = $('#ext-body');
+    const back = document.createElement('button');
+    back.className = 'ext-back';
+    back.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>扩展';
+    back.onclick = () => {
+      S.ext = null;
+      const t = $('#tb-title');
+      if (t) t.textContent = '扩展';
+      renderExt();
+    };
+    if (S.ext === 'sources') renderSources(host);
+    else if (S.ext === 'history') renderHistory(host);
+    else if (S.ext === 'stats') renderStats(host);
+    /* 返回按钮插进子页自己的 .page-head，跟着吸顶一起走 */
+    const head = host.querySelector('.page-head');
+    if (head) head.insertBefore(back, head.firstChild); else host.insertBefore(back, host.firstChild);
+  }
+
+  /** 切换搜索方式：书源 / 网页。两边共用同一个输入框和结果区。 */
+  function setSearchMode(mode) {
+    S.searchMode = mode === 'web' ? 'web' : 'src';
+    if (S.state && S.state.settings) { S.state.settings.searchMode = S.searchMode; save(); }
+    const qm = $('#quick-mode'); if (qm) qm.value = S.searchMode;
+    const q = $('#quick-search');
+    if (q) q.placeholder = S.searchMode === 'web' ? '按书名去网上找站 / 粘网址' : '搜索书名 / 作者';
+    /* 换方式等于换了一套结果，旧列表不能留着（书源结果混在网页结果里会误点）；
+       输入框里的词保留着，切过去直接按新方式再搜一遍 */
+    const v = $('#view-search');
+    if (v) v.dataset.touched = '';
+    if (S.view === 'search') {
+      renderSearch();
+      const inp = $('#search-input');
+      const kw = inp ? inp.value.trim() : '';
+      if (kw) runSearch(kw);
+    }
+  }
+
   function setView(v) {
+    /* 书源 / 历史 / 统计已经收进扩展：老名字继续认，外部调用点（空书架引导、
+       搜索无结果的提示、快捷键）不用跟着改 */
+    if (v === 'sources' || v === 'history' || v === 'stats') { S.ext = v; v = 'ext'; }
+    if (v === 'web') { setSearchMode('web'); v = 'search'; }
+    if (v === 'bookmarks') v = 'shelf';        // 书签搬进阅读器了，别停在空页上
     S.view = v;
     $$('.rail-btn').forEach(b => b.classList.toggle('active', b.dataset.view === v));
     $$('.view').forEach(el => el.classList.toggle('active', el.id === 'view-' + v));
-    const names = { shelf: '书架', search: '搜索', sources: '书源', web: '网页搜书', bookmarks: '书签', history: '历史', stats: '统计', settings: '设置' };
+    const names = {
+      shelf: '书架', search: '搜索', ext: S.ext ? EXT_NAME[S.ext] : '扩展', settings: '设置'
+    };
     $('#tb-title').textContent = names[v] || '';
     if (v === 'shelf') renderShelf();
     if (v === 'search') renderSearch();
-    if (v === 'sources') renderSources();
-    if (v === 'web') renderWeb();
-    if (v === 'bookmarks') renderBookmarks();
-    if (v === 'history') renderHistory();
-    if (v === 'stats') renderStats();
+    if (v === 'ext') renderExt();
     if (v === 'settings') renderSettings();
   }
 
@@ -599,15 +800,15 @@
           <div class="web-start-btns">
             <button class="btn primary" data-start="import">导入本地书（TXT / EPUB）</button>
             <button class="btn" data-start="restore">从备份文件恢复</button>
-            <button class="btn" data-start="source">去书源找网络小说</button>
+            <button class="btn" data-start="source">搜一本网络小说</button>
           </div>
           <p class="web-start-tip">${onDeviceStore()
             ? '从手机「阅读」App 或墨读导出的备份，在这里恢复一次就永久留在服务器上。'
             : '换设备、或清理过浏览器数据后，用「从备份文件恢复」把书架和进度找回来。'}</p>
         </div>`
       : `<div class="empty" style="grid-column:1/-1">书架还是空的。<br>${isAndroidApp()
-        ? '点右上角 <b>导入</b> 选手机里的 txt / epub，或去「书源」搜网络小说。'
-        : '拖入 TXT / EPUB，或去「书源」搜索网络小说。'}</div>`);
+        ? '点右上角 <b>导入</b> 选手机里的 txt / epub，或用右上角的<b>放大镜</b>搜网络小说。'
+        : '拖入 TXT / EPUB，或用右上角的<b>放大镜</b>搜索网络小说。'}</div>`);
 
     /* 网页版空书架已经有引导卡，底部那条「拖进窗口」的提示是重复的，先收起来 */
     const dh = $('.drop-hint');
@@ -619,7 +820,7 @@
         const k = btn.dataset.start;
         if (k === 'import') importBooks();
         else if (k === 'restore') restoreFromZip();
-        else if (k === 'source') setView('web');
+        else if (k === 'source') { setSearchMode('src'); setView('search'); }
       };
     });
 
@@ -707,8 +908,14 @@
       try {
         const src = srcForBook(b);
         if (!src) throw new Error('书源不存在');
-        const { chapters, info } = await Engine.getToc(mo.net, src, b.bookUrl);
+        const { chapters, info, tocUrl } = await Engine.getToc(netGet, src, b.bookUrl, {
+          tocUrl: b.tocUrl && b.tocUrl !== b.bookUrl ? b.tocUrl : '',
+          expect: b.total || 0,
+          reverse: !!(b.readConfig && b.readConfig.reverseToc)
+        });
         b.chapters = chapters; b.total = chapters.length; b.updatedAt = Date.now();
+        if (tocUrl) b.tocUrl = tocUrl;
+        b.tocFixed = true;   // 用户手动更新过，别再后台偷偷改
         if (info.coverUrl) b.cover = info.coverUrl;
         save(true);
         toast(`目录已更新：${chapters.length} 章`);
@@ -749,26 +956,71 @@
   }
   window.__closeModal = closeModal;
 
-  /* ---------------- 搜索 ---------------- */
+  /* ---------------- 搜索（书源 / 网页 二合一） ----------------
+   * 以前是两个入口：侧栏「网页」是一个小浏览器，「书源搜索」另开一页。
+   * 现在合成一个搜索框，左边下拉选「书源」还是「网页」：
+   *   · 书源 —— 在本地书源里找书，搜到直接加书架（快、能换源）
+   *   · 网页 —— 用搜索引擎找站点，按书归并成卡片，可预览 / 加书架
+   * 两种结果都落在同一个 #search-results 里，样子一致，操作一致。 */
+  const ENGINE_NAMES = [['bing', '必应'], ['baidu', '百度'], ['sogou', '搜狗'], ['so360', '360']];
+  const webEngine = () => (S.state.settings.webSearch && S.state.settings.webSearch.engine) || 'bing';
+
+  function searchHint() {
+    if (S.searchMode === 'web') {
+      return `<div class="empty">网页搜书：输入书名去搜索引擎找站点，或直接粘一个目录页网址。<br>
+        同名的书在多个站会合成一张卡，可以点站点标签换站，<b>预览</b> 能先看目录和正文再加书架。<br>
+        站点有反爬时可能抓不到，换个站或换个引擎再试。</div>`;
+    }
+    return `<div class="empty">书源搜索：在已启用的书源里找书，搜到直接加书架，同名多源可以换源。<br>
+      想按网站自己找（包括漫画站）、或者书源里压根没有——把上面的方式切到 <b>网页</b>。<br>
+      没有书源？去 <a class="link" id="go-src-manage">扩展 → 书源</a> 导入 Legado 书源 JSON。</div>`;
+  }
+
   function renderSearch() {
     const v = $('#view-search');
-    if (v.dataset.ready) return;
-    v.dataset.ready = '1';
-    v.innerHTML = `
-      <div class="page-head">
-        <h1>搜索</h1>
-        <span class="sub" id="search-sub"></span>
-        <div class="head-tools">
-          <div class="searchbox" style="width:320px">
-            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
-            <input id="search-input" placeholder="输入书名或作者，回车搜索" />
+    if (!v) return;
+    if (!v.dataset.ready) {
+      v.dataset.ready = '1';
+      v.innerHTML = `
+        <div class="page-head">
+          <h1>搜索</h1>
+          <span class="sub" id="search-sub"></span>
+          <div class="head-tools">
+            <div class="searchbox">
+              <select id="search-mode" class="smode" title="搜索方式">
+                <option value="src">书源</option>
+                <option value="web">网页</option>
+              </select>
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+              <input id="search-input" placeholder="输入书名或作者，回车搜索" />
+            </div>
+            <select id="search-engine" class="tb-select" title="网页搜书用的搜索引擎">
+              ${ENGINE_NAMES.map(([k, n]) => `<option value="${k}">${n}</option>`).join('')}
+            </select>
+            <button class="btn primary" id="btn-do-search">搜索</button>
           </div>
-          <button class="btn primary" id="btn-do-search">搜索</button>
         </div>
-      </div>
-      <div class="list" id="search-results"><div class="empty">启用书源后，可以在线搜索小说。<br>没有书源？去「书源」导入 Legado 书源 JSON。</div></div>`;
-    $('#search-input').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(e.target.value.trim()); });
-    $('#btn-do-search').onclick = () => runSearch($('#search-input').value.trim());
+        <div class="list" id="search-results"></div>`;
+      $('#search-input').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(e.target.value.trim()); });
+      $('#btn-do-search').onclick = () => runSearch($('#search-input').value.trim());
+      $('#search-mode').onchange = e => setSearchMode(e.target.value);
+      $('#search-engine').onchange = e => {
+        S.state.settings.webSearch.engine = e.target.value;
+        save(true);
+        const kw = $('#search-input').value.trim();
+        if (kw && S.searchMode === 'web') runSearch(kw);
+      };
+    }
+    $('#search-mode').value = S.searchMode;
+    const eng = $('#search-engine');
+    if (eng) { eng.value = webEngine(); eng.style.display = S.searchMode === 'web' ? '' : 'none'; }
+    const inp = $('#search-input');
+    if (inp) inp.placeholder = S.searchMode === 'web' ? '按书名去网上搜站点，或粘网址' : '输入书名或作者，回车搜索';
+    if (!v.dataset.touched) {
+      $('#search-results').innerHTML = searchHint();
+      const gs = $('#go-src-manage');
+      if (gs) gs.onclick = () => setView('sources');
+    }
   }
 
   /** 书源太多时不能全量去搜：优先书架上用得到的、搜成功过的 */
@@ -795,7 +1047,12 @@
   async function runSearch(kw) {
     if (!kw) return;
     renderSearch();
+    const view = $('#view-search');
+    if (view) view.dataset.touched = '1';
+    const inp = $('#search-input');
+    if (inp) inp.value = kw;
     const seq = ++searchSeq;
+    if (S.searchMode === 'web') { runWebSearch(kw, seq); return; }
     const all = S.state.sources.filter(s => s.enabled && s.searchUrl);
     const cap = clamp(S.state.settings.searchLimit || 40, 1, 500);
     const srcs = pickSearchSources(all, cap);
@@ -820,7 +1077,7 @@
     });
 
     if (!srcs.length) {
-      $('#search-progress').innerHTML = '没有启用的书源 —— <a class="link" id="go-src">去书源页</a>';
+      $('#search-progress').innerHTML = '没有启用的书源 —— <a class="link" id="go-src">去扩展 → 书源</a>';
       $('#go-src').onclick = () => setView('sources');
       return;
     }
@@ -844,7 +1101,7 @@
         if (seq !== searchSeq) return;
         try {
           const t0 = performance.now();
-          const r = await withTimeout(Engine.search(mo.net, s, kw), 9000);
+          const r = await withTimeout(Engine.search(netGet, s, kw), 9000);
           const ms = Math.round(performance.now() - t0);
           s.lastTest = Date.now(); s.lastLatency = ms; s.lastCount = r.length; s.lastError = '';
           if (r.length) hitSrc++;
@@ -866,25 +1123,407 @@
     }
   }
 
+  /* 搜索结果是「一本书 × N 个源」。以前每个源单独一行、书名还可能是站点名，
+     十条记录看起来像十本不同的书。现在按书名合并成一张卡片，
+     书源收进标签里（用户要的就是「书名 + 是哪个源」），点进去还能换源。
+     只按书名合并是因为同一本书在不同源上作者字段经常一个有一个没有
+     （「扑街天线」vs「佚名」）；卡片里的作者取第一个非「佚名」的。 */
+  function resKey(name) {
+    return String(name || '').replace(/[\s·•・,，.。!！?？:：;；"'“”‘’()（）\[\]【】<>《》_\-—~～|/\\]/g, '').toLowerCase();
+  }
+
+  function groupResults(list) {
+    const map = new Map();
+    for (const r of list) {
+      if (!r || !r.name) continue;
+      const k = resKey(r.name);
+      let g = map.get(k);
+      if (!g) {
+        g = { name: r.name, author: r.author, kind: r.kind, intro: r.intro, lastChapter: r.lastChapter, coverUrl: r.coverUrl, rel: r.rel || 0, alts: [] };
+        map.set(k, g);
+      }
+      if ((!g.author || g.author === '佚名') && r.author && r.author !== '佚名') g.author = r.author;
+      g.alts.push(r);
+      if (!g.coverUrl && r.coverUrl) g.coverUrl = r.coverUrl;
+      if (!g.lastChapter && r.lastChapter) g.lastChapter = r.lastChapter;
+      if (!g.kind && r.kind) g.kind = r.kind;
+      if (!g.intro && r.intro) g.intro = r.intro;
+      if ((r.rel || 0) > g.rel) g.rel = r.rel;
+    }
+    const qrank = r => {
+      const q = (sourceById(r.sourceId) || {}).quality;
+      return q === 'great' ? 0 : q === 'ok' ? 1 : q === 'poor' ? 3 : q === 'dead' ? 4 : 2;
+    };
+    const groups = [...map.values()];
+    for (const g of groups) {
+      g.alts.sort((a, b) => (qrank(a) - qrank(b)) || (b.coverUrl ? 1 : 0) - (a.coverUrl ? 1 : 0));
+    }
+    groups.sort((a, b) => (b.rel - a.rel) || (b.alts.length - a.alts.length));
+    return groups;
+  }
+
   function paintOnline(list) {
     const box = $('#search-online');
     if (!box) return;
-    if (!list.length) { box.innerHTML = `<div class="empty">没有找到结果，换个关键词，或检查书源规则。</div>`; return; }
-    box.innerHTML = `<div class="src-label">网络 · ${list.length}</div>` + list.slice(0, 80).map((r, i) => `
-      <div class="row-card">
-        ${r.coverUrl ? `<img src="${esc(r.coverUrl)}" style="width:34px;height:46px;object-fit:cover;border-radius:4px" onerror="this.style.visibility='hidden'">`
-          : `<div class="ico">${esc((r.name || '?')[0])}</div>`}
-        <div class="body">
-          <div class="t">${esc(r.name)}</div>
-          <div class="s">${esc(r.author)} · ${esc(r.sourceName)}${r.lastChapter ? ' · ' + esc(r.lastChapter) : ''}</div>
-        </div>
-        <div class="act"><button class="btn sm primary" data-add="${i}">加入书架</button></div>
-      </div>`).join('');
-    $$('[data-add]').forEach(b => b.onclick = async () => {
+    if (!list.length) {
+      box.innerHTML = `<div class="empty">这次没有搜到这本书。<br>书名里有错字、或者站点改名都会搜不到 —— 换个短一点的关键词再试；<br>也可以到「设置 → 每次搜索的书源数」调大，或切到<a class="link" id="res-go-web">网页搜书</a>直接找站。</div>`;
+      const gw = $('#res-go-web');
+      if (gw) gw.onclick = () => { setSearchMode('web'); };
+      return;
+    }
+    const groups = groupResults(list);
+    box.innerHTML = `<div class="src-label">网络 · ${groups.length} 本（共 ${list.length} 条，来自 ${new Set(list.map(r => r.sourceId)).size} 个源）</div>`
+      + groups.slice(0, 60).map((g, i) => {
+        const srcNames = g.alts.map(a => a.sourceName).filter(Boolean);
+        const chips = srcNames.slice(0, 3).map(n => `<span class="chip res-src">${esc(n)}</span>`).join('')
+          + (srcNames.length > 3 ? `<span class="chip res-src more">+${srcNames.length - 3}</span>` : '');
+        return `<div class="row-card click res-card" data-g="${i}">
+          ${g.coverUrl ? `<img class="res-cover" src="${esc(g.coverUrl)}" alt="" onerror="this.style.visibility='hidden'">`
+            : `<div class="ico">${esc((g.name || '?')[0])}</div>`}
+          <div class="body">
+            <div class="t">${esc(g.name)}${g.kind ? `<span class="chip res-kind">${esc(g.kind)}</span>` : ''}</div>
+            <div class="s">${esc(g.author || '佚名')}${g.lastChapter ? ' · ' + esc(g.lastChapter) : ''}</div>
+            <div class="res-srcs">${chips}${g.alts.length > 1 ? `<span class="chip res-n">${g.alts.length} 个源，可换源</span>` : ''}</div>
+          </div>
+          <div class="act">
+            <button class="btn sm" data-prev-btn="${i}">预览</button>
+            <button class="btn sm primary" data-add="${i}">加入书架</button>
+          </div>
+        </div>`;
+      }).join('');
+    $$('[data-g]').forEach(el => el.onclick = e => {
+      if (e.target.closest('[data-add]') || e.target.closest('[data-prev-btn]')) return;
+      const g = groups[+el.dataset.g];
+      previewOnlineBook(g.alts[0], g.alts);
+    });
+    $$('[data-prev-btn]').forEach(b => b.onclick = e => {
+      e.stopPropagation();
+      const g = groups[+b.dataset.prevBtn];
+      previewOnlineBook(g.alts[0], g.alts);
+    });
+    $$('[data-add]').forEach(b => b.onclick = async e => {
+      e.stopPropagation();
+      const g = groups[+b.dataset.add];
       b.disabled = true; b.textContent = '添加中…';
-      await addOnlineBook(list[+b.dataset.add]);
+      await addOnlineBook(g.alts[0]);
       b.textContent = '已加入';
     });
+  }
+
+  /* ---------------- 搜索结果预览 ----------------
+   * 以前只有「加入书架」一个按钮：没看过目录就入库，进去才发现章节不对/根本是另一个页面。
+   * 预览先把简介和目录抓回来给人看，确认无误再加；「试读」能直接看第一章正文。 */
+  const pvCache = new Map();
+
+  async function previewOnlineBook(r, alts) {
+    const list = Array.isArray(alts) && alts.length ? alts : [r];
+    const src = sourceById(r.sourceId);
+    const inShelf = S.state.books.find(b => b.bookUrl === r.bookUrl);
+    openModal(`<div class="pv-top">
+        <div class="pv-cover">${r.coverUrl ? `<img src="${esc(r.coverUrl)}" alt="" onerror="this.parentNode.classList.add('ph')">` : esc((r.name || '?')[0])}</div>
+        <div class="pv-meta">
+          <div class="pv-name">${esc(r.name)}</div>
+          <div class="pv-author">${esc(r.author || '佚名')}</div>
+          <div class="pv-tags">
+            <span class="chip tag">${esc(r.sourceName || (src && src.name) || '')}</span>
+            ${r.kind ? `<span class="chip">${esc(r.kind)}</span>` : ''}
+            ${list.length > 1 ? `<button class="btn sm" id="pv-switch">换源 · ${list.length} 个</button>` : ''}
+          </div>
+          <div class="pv-intro" id="pv-intro">${esc(r.intro || '（这个源没有给简介）')}</div>
+        </div>
+      </div>
+      <div class="pv-toc-head">目录 <span class="sub" id="pv-count"></span></div>
+      <div class="pv-toc" id="pv-toc"><div class="hint">正在获取目录…</div></div>
+      <div class="modal-actions">
+        <button class="btn left" id="pv-try">试读</button>
+        <button class="btn" onclick="window.__closeModal()">关闭</button>
+        <button class="btn primary" id="pv-add">${inShelf ? '已在书架' : '加入书架'}</button>
+      </div>`, true);
+
+    const swBtn = $('#pv-switch');
+    if (swBtn) swBtn.onclick = () => showSourcePicker(r, list);
+
+    const addBtn = $('#pv-add');
+    addBtn.disabled = !!inShelf;
+    addBtn.onclick = async () => {
+      addBtn.disabled = true; addBtn.textContent = '添加中…';
+      try {
+        const bk = await addOnlineBook(r);
+        addBtn.textContent = bk ? '已加入' : '已在书架';
+        toast('已加入书架');
+      } catch (e) {
+        addBtn.disabled = false; addBtn.textContent = '加入书架';
+      }
+    };
+
+    let chapters = [];
+    const key = r.sourceId + '|' + r.bookUrl;
+    const fetchToc = async () => {
+      if (!src) throw new Error('这个书源已经不在了，换一个源或去网页搜书看看');
+      if (pvCache.has(key)) return pvCache.get(key);
+      const t = await withTimeout(Engine.getToc(netGet, src, r.bookUrl), 25000);
+      pvCache.set(key, t);
+      return t;
+    };
+    $('#pv-try').onclick = async () => {
+      const btn = $('#pv-try');
+      btn.disabled = true; btn.textContent = '加载中…';
+      try {
+        if (!chapters.length) {
+          const t = await fetchToc();
+          chapters = t.chapters;
+        }
+        if (!chapters.length) throw new Error('这个源没给目录，先试试加入书架');
+        readPreview(r, src, chapters[0], list);
+      } catch (e) { toast('打不开：' + (e.message || e)); }
+      btn.disabled = false; btn.textContent = '试读';
+    };
+
+    try {
+      const t = await fetchToc();
+      chapters = t.chapters;
+      if (t.info) {
+        if (!r.intro && t.info.intro) $('#pv-intro').textContent = t.info.intro.slice(0, 300);
+        if (t.info.author && !r.author) $('.pv-author').textContent = t.info.author;
+        if (t.info.coverUrl && !r.coverUrl) {
+          const c = $('.pv-cover');
+          c.classList.remove('ph');
+          c.innerHTML = `<img src="${esc(t.info.coverUrl)}" alt="" onerror="this.parentNode.classList.add('ph')">`;
+        }
+      }
+      const box = $('#pv-toc');
+      const cnt = $('#pv-count');
+      if (cnt) cnt.textContent = chapters.length ? `共 ${chapters.length} 章` : '没有取到';
+      if (!chapters.length) {
+        box.innerHTML = `<div class="hint">这个源没有返回章节列表，多半是目录规则失效了 —— 建议换一个源再看。</div>`;
+      } else {
+        box.innerHTML = chapters.slice(0, 30).map((c, i) =>
+          `<button class="pv-ch" data-ci="${i}">${esc(c.title)}</button>`).join('')
+          + (chapters.length > 30 ? `<div class="hint">只显示前 30 章，共 ${chapters.length} 章</div>` : '');
+        $$('.pv-ch').forEach(b => b.onclick = () => readPreview(r, src, chapters[+b.dataset.ci], list));
+      }
+    } catch (e) {
+      const box = $('#pv-toc');
+      const raw = String((e && e.message) || e || '');
+      /* 「Cannot read properties of undefined」对用户没有意义，换成能行动的提示 */
+      const msg = /Cannot read|undefined|null is not|not a function/i.test(raw)
+        ? '这个源的目录规则失效了，换一个源试试'
+        : raw;
+      const tip = /换一个源|换源/.test(msg) ? '' : '<br>可以换个源，或先加入书架再「更新目录」。';
+      if (box) box.innerHTML = `<div class="hint">目录没取到：${esc(msg)}${tip}</div>`;
+    }
+  }
+
+  /** 预览里的换源：同一本书的其他书源，点一行直接换过去看目录 */
+  function showSourcePicker(cur, list) {
+    const qname = { great: '优质', ok: '有效', poor: '较差', dead: '失效' };
+    openModal(`<h3 class="pv-title">换源 · ${esc(cur.name)}</h3>
+      <p class="desc">同一个源偶尔目录/正文会失效，换一个往往就好了。点一行直接切过去看目录。</p>
+      <div class="sw-list" id="pv-src-list">${list.map((r, i) => {
+        const q = (sourceById(r.sourceId) || {}).quality;
+        const on = r.bookUrl === cur.bookUrl;
+        return `<div class="sw-item ${on ? 'cur' : ''}" data-i="${i}">
+          <div class="sw-ico">${esc((r.sourceName || '源')[0])}</div>
+          <div class="sw-body">
+            <div class="sw-t">${esc(r.sourceName || '未知源')}<span class="chip">${esc(r.author || '佚名')}</span>${q ? `<span class="chip q-${q}">${qname[q] || ''}</span>` : ''}${on ? '<span class="chip on">正在看</span>' : ''}</div>
+            <div class="sw-s">${esc(r.lastChapter || r.bookUrl)}</div>
+          </div>
+          <button class="btn sm ${on ? '' : 'primary'}">${on ? '当前' : '看这个源'}</button>
+        </div>`;
+      }).join('')}</div>
+      <div class="modal-actions"><button class="btn" onclick="window.__closeModal()">关闭</button></div>`, true);
+    $$('#pv-src-list [data-i]').forEach(el => el.onclick = () => {
+      const r = list[+el.dataset.i];
+      if (!r) return;
+      previewOnlineBook(r, list);
+    });
+  }
+
+
+  /* ---------------- 网页书预览 ----------------
+   * 以前网页搜书只有一个「加入书架」：用户不知道点进去是目录页、详情页还是一篇文章，
+   * 加完才发现读不了。这里跟书源预览一样，先把书名/简介/目录/正文摆出来再决定。
+   * 目录补全统一交给 Engine.sniffBook（见引擎里的「网页书嗅探」）。 */
+
+  /** 用嗅探出来的规则拼一个临时「源」，正文/目录都能像书源那样取 */
+  function webPseudoSource(url, d) {
+    let site = '';
+    try { site = new URL(url).origin; } catch (e) { site = ''; }
+    return {
+      id: '__web', name: '网页抓取', url: site, charset: 'auto', type: 'web',
+      headers: site ? { Referer: site + '/' } : undefined,
+      ruleSearch: {}, ruleBookInfo: {},
+      ruleToc: (d && d.toc && d.toc.rule) || {},
+      ruleContent: (d && d.content) ? { content: d.content.selector } : {}
+    };
+  }
+
+  async function previewWebBook(url, preset) {
+    openModal(`<div class="pv-top">
+        <div class="pv-cover ph">…</div>
+        <div class="pv-meta">
+          <div class="pv-name">正在分析页面…</div>
+          <div class="pv-author">${esc(hostOf(url))}</div>
+          <div class="pv-tags"><span class="chip tag">网页抓取</span></div>
+          <div class="pv-intro">正在读取这本书的目录和简介，稍等。</div>
+        </div>
+      </div>
+      <div class="pv-toc-head">目录 <span class="sub" id="pv-count"></span></div>
+      <div class="pv-toc" id="pv-toc"><div class="hint">正在获取…</div></div>
+      <div class="modal-actions">
+        <button class="btn left" id="pv-try" disabled>试读</button>
+        <button class="btn" onclick="window.__closeModal()">关闭</button>
+        <button class="btn primary" id="pv-add" disabled>加入书架</button>
+      </div>`, true);
+
+    const t0 = Date.now();
+    const box = $('#pv-toc');
+    let painted = '';
+
+    /* 先把手上已有的东西画出来（目录可能只有「最新章节」十来条），补全后再画一次。
+       这样点开就有反应，而不是盯着「正在获取…」等两三个往返。 */
+    const paint = (d, finalUrl, partial) => {
+      const info = d.info || {};
+      const name = (info.name || d.title || hostOf(finalUrl) || '未命名').replace(/[_-].*$/, '').trim().slice(0, 40) || '未命名';
+      const chapters = d.toc ? d.toc.chapters : [];
+      const comicN = d.comic ? d.comic.count : 0;
+      const r = {
+        name, author: info.author || '佚名', bookUrl: finalUrl,
+        coverUrl: info.coverUrl || '', intro: info.intro || '',
+        sourceName: '网页抓取', __web: true
+      };
+      const src = webPseudoSource(finalUrl, d);
+
+      const top = $('.pv-top');
+      if (top) {
+        top.querySelector('.pv-cover').outerHTML = `<div class="pv-cover ${r.coverUrl ? '' : 'ph'}">${r.coverUrl ? `<img src="${esc(r.coverUrl)}" alt="" onerror="this.parentNode.classList.add('ph')">` : esc(name[0])}</div>`;
+        top.querySelector('.pv-name').textContent = name;
+        top.querySelector('.pv-author').textContent = r.author;
+        top.querySelector('.pv-tags').innerHTML = `<span class="chip tag">${esc(Engine.siteLabel(hostOf(finalUrl)) || '网页抓取')}</span>`
+          + (comicN >= 2 ? '<span class="chip">漫画</span>' : '')
+          + (chapters.length ? `<span class="chip">${chapters.length} 章</span>` : '');
+        top.querySelector('.pv-intro').textContent = r.intro || (comicN >= 2 ? '这一页是漫画图，没有简介。' : '（这个页面没有简介）');
+      }
+
+      const cnt = $('#pv-count');
+      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      if (cnt) cnt.textContent = chapters.length
+        ? `共 ${chapters.length} 章${partial ? ' · 正在补全…' : ` · ${secs}s`}`
+        : (comicN >= 2 ? `图片 ${comicN} 张` : (partial ? '正在找目录…' : '没有找到目录'));
+
+      const addBtn = $('#pv-add'), tryBtn = $('#pv-try');
+      addBtn.disabled = false;
+      addBtn.textContent = '加入书架';
+      addBtn.onclick = async () => {
+        addBtn.disabled = true; addBtn.textContent = '添加中…';
+        try {
+          await addWebBook(finalUrl, d);
+          addBtn.textContent = '已加入';
+        } catch (e) {
+          addBtn.disabled = false; addBtn.textContent = '加入书架';
+          toast('加入失败：' + (e.message || e));
+        }
+      };
+      const back = () => previewWebBook(finalUrl);
+
+      if (chapters.length) {
+        const key = chapters.length + '|' + (partial ? 1 : 0);
+        if (painted !== key) {
+          painted = key;
+          const show = chapters.slice(0, 40);
+          box.innerHTML = show.map((c, i) =>
+            `<button class="pv-ch" data-ci="${i}">${esc(c.title)}</button>`).join('')
+            + (chapters.length > show.length || partial
+              ? `<div class="hint">${partial ? '正在补全目录' : `只显示前 ${show.length} 章`}，共 ${chapters.length} 章</div>` : '');
+          $$('.pv-ch').forEach(b => {
+            b.onclick = () => readPreview(r, src, chapters[+b.dataset.ci], null, back);
+          });
+          box.scrollTop = 0;
+        }
+        tryBtn.disabled = false;
+        tryBtn.onclick = () => readPreview(r, src, chapters[0], null, back);
+      } else if (comicN >= 2) {
+        box.innerHTML = `<div class="hint">这一页是漫画图（${comicN} 张），没有目录 —— 加入后按「单页」读，点下面的「试读」先看看图能不能正常显示。</div>`;
+        tryBtn.disabled = false;
+        tryBtn.onclick = () => readPreview(r, src, { title: name, url: finalUrl }, null, back);
+      } else {
+        box.innerHTML = `<div class="hint">${partial ? '正在找这本书的目录…' : '这个页面里没有目录，只有一篇正文 —— 加入后只有这一页，不能按章翻。<br>想要按章读，请打开这本书的目录页再预览。'}</div>`;
+        tryBtn.disabled = !partial;
+      }
+      return r;
+    };
+
+    try {
+      let html = '', finalUrl = (preset && preset.url) || url;
+      let d = preset && preset.d;
+      if (!d) {
+        const r = await netGet({ url, charset: 'auto', timeout: 15000 });
+        if (!r || r.ok === false) throw new Error('打不开这个地址：' + ((r && r.error) || '网络错误'));
+        html = r.text || '';
+        finalUrl = r.url || url;
+        d = Engine.detectPage(html, finalUrl);
+      } else if (preset.html) {
+        html = preset.html;
+      } else {
+        /* 只给了分析结果没给原文：补一次（有缓存，通常 0ms） */
+        const r = await netGet({ url: finalUrl, charset: 'auto', timeout: 15000 });
+        if (r && r.ok !== false) html = r.text || '';
+      }
+      if (d.serp) throw new Error('这是搜索结果页，不是书；点下面某一条进到书页再预览');
+      if (Engine.pageBlocked(html, d.title)) throw new Error('这个站拦了自动抓取（人机验证），换一家站再试');
+
+      paint(d, finalUrl, true);
+
+      /* 补全目录：同页「目录」链接 / 章节页的「返回目录」/ 站点固定路径，三条路并行 */
+      const res = await Engine.sniffBook(netGet, finalUrl, {
+        page: html ? { html, url: finalUrl } : null,
+        detected: d, timeout: 15000
+      });
+      const full = paint(res.d, res.url, false);
+
+      /* 预热第一章：点「试读」时不用再等一个完整往返 */
+      const ch0 = res.d.toc && res.d.toc.chapters[0];
+      if (ch0) netGet({ url: ch0.url, charset: 'auto', timeout: 12000 }).catch(() => { });
+      if (full && !res.d.toc && res.d.url !== finalUrl) finalUrl = res.d.url;
+    } catch (e) {
+      box.innerHTML = `<div class="hint">${esc(e.message || e)}</div>`;
+    }
+  }
+
+  /** 弹窗里读一章（不加入书架也能看，判断这本书到底对不对） */
+  async function readPreview(r, src, ch, alts, back) {
+    openModal(`<h3 class="pv-title">${esc(r.name)}</h3>
+      <div class="pv-ch-title">${esc(ch.title)}</div>
+      <div class="pv-read" id="pv-read"><div class="hint">正在加载…</div></div>
+      <div class="modal-actions">
+        <button class="btn left" id="pv-back">返回目录</button>
+        <button class="btn primary" id="pv-add2">加入书架</button>
+      </div>`, true);
+    $('#pv-back').onclick = () => (typeof back === 'function' ? back() : previewOnlineBook(r, alts));
+    $('#pv-add2').onclick = async () => {
+      const b = $('#pv-add2');
+      b.disabled = true; b.textContent = '添加中…';
+      try {
+        if (r.__web) await addWebBook(r.bookUrl);
+        else await addOnlineBook(r);
+        b.textContent = '已加入';
+      } catch (e) {
+        b.disabled = false; b.textContent = '加入书架';
+        toast('加入失败：' + (e.message || e));
+      }
+    };
+    const box = $('#pv-read');
+    try {
+      const c = await withTimeout(Engine.getContent(netGet, src, ch.url), 20000);
+      let paras = c.paras || [];
+      if (c.blocked) throw new Error('这个站要求人机验证（或本章是 VIP 章节），过一会儿再试，或换个源');
+      if (c.fail === 'json') throw new Error('这个源的正文是加密接口（返回 JSON 密文），本机解不开');
+      if (paras.some(isRemoteImg)) paras = await resolveImgs(paras, src);
+      if (!paras.length) throw new Error('正文为空');
+      box.innerHTML = parasMap(paras, 360);
+    } catch (e) {
+      box.innerHTML = `<div class="hint">这一章打不开：${esc(e.message || e)}<br>正文规则可能失效，换个源试试。</div>`;
+    }
   }
 
   async function addOnlineBook(r) {
@@ -902,15 +1541,18 @@
     renderShelf();
     toast(`已加入《${r.name}》，正在获取目录…`);
     try {
-      const { chapters, info } = await Engine.getToc(mo.net, src, r.bookUrl);
+      const toc = await Engine.getToc(netGet, src, r.bookUrl);
+      const chapters = toc.chapters, info = toc.info || {};
       book.chapters = chapters;
       book.total = chapters.length;
+      if (toc.tocUrl) book.tocUrl = toc.tocUrl;
       if (info.intro) book.intro = info.intro;
       if (info.coverUrl) book.cover = info.coverUrl;
       if (info.author) book.author = info.author;
       save(true);
       renderShelf();
-      toast(`《${book.name}》目录 ${chapters.length} 章`);
+      if (!chapters.length) toast(`《${book.name}》已加入，但这个源没给目录 —— 在书架里长按「换源」换一个源`);
+      else toast(`《${book.name}》目录 ${chapters.length} 章`);
     } catch (e) {
       toast('目录获取失败：' + (e.message || e));
     }
@@ -918,10 +1560,8 @@
   }
 
   /* ===========================================================
-     网页搜书（内置浏览器 + 自动嗅探加书架）
+     网页搜书（抓页面 → 本机识别 → 加书架）
      =========================================================== */
-  const WEB = { built: false, view: null, lastUrl: '' };
-
   const ENGINES = {
     bing: k => 'https://www.bing.com/search?q=' + encodeURIComponent(k),
     baidu: k => 'https://www.baidu.com/s?wd=' + encodeURIComponent(k),
@@ -931,100 +1571,6 @@
 
   function isUrlLike(s) {
     return /^(https?:\/\/|www\.)\S+$/i.test(s.trim());
-  }
-
-  function renderWeb() {
-    if (isAndroidApp()) return renderWebMobile();
-    const v = $('#view-web');
-    if (WEB.built) { updateWebNav(); return; }
-
-    v.innerHTML = `
-      <div class="web-bar">
-        <div class="wb-nav">
-          <button class="wbtn" id="w-back" title="后退"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
-          <button class="wbtn" id="w-fwd" title="前进"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
-          <button class="wbtn" id="w-reload" title="刷新"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
-        </div>
-        <input id="w-url" class="w-url" spellcheck="false" placeholder="输入网址，或直接输入书名搜索（回车）" />
-        <button class="btn sm" id="w-go">打开</button>
-        <button class="btn sm" id="w-sniff">
-          <svg viewBox="0 0 24 24" style="width:14px;height:14px"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
-          嗅探本页
-        </button>
-        <select id="w-engine" class="w-engine" title="搜索引擎">
-          ${[['bing', '必应'], ['baidu', '百度'], ['sogou', '搜狗'], ['so360', '360']].map(([k, n]) =>
-            `<option value="${k}" ${(S.state.settings.webSearch.engine || 'bing') === k ? 'selected' : ''}>${n}</option>`).join('')}
-        </select>
-      </div>
-      <div class="web-body">
-        <div class="web-host" id="w-host"></div>
-        <div class="web-empty" id="w-empty">
-          <div class="we-box">
-            <div class="we-t">网页搜书</div>
-            <div class="we-s">在上面输入网址，或直接输入书名回车；也可以用搜索引擎找到小说站，再点「嗅探本页」把书加进书架。</div>
-            <div class="we-acts">
-              <button class="btn sm" data-we="https://www.bing.com">打开必应</button>
-              <button class="btn sm" data-we="https://www.baidu.com">打开百度</button>
-              <button class="btn sm" data-we="paste">粘贴地址</button>
-            </div>
-            <ul class="we-tips">
-              <li>「嗅探本页」会自动找目录和正文，为这本书生成抓取规则</li>
-              <li>加进书架后按章节读，和书源的书一样能记进度、换源、朗读</li>
-              <li>部分站点会拦截抓取，换个页面或稍后再试</li>
-            </ul>
-          </div>
-        </div>
-        <div class="web-loading" id="w-loading"><i></i></div>
-        <div class="web-panel" id="w-panel"></div>
-      </div>`;
-
-    const wv = document.createElement('webview');
-    wv.id = 'w-view';
-    wv.setAttribute('partition', 'persist:moread-web');
-    wv.setAttribute('allowpopups', 'false');
-    wv.setAttribute('src', S.state.settings.webSearch.url || 'about:blank');
-    $('#w-host').appendChild(wv);
-    WEB.view = wv;
-    WEB.built = true;
-
-    wv.addEventListener('did-start-loading', () => $('#w-loading').classList.add('on'));
-    wv.addEventListener('did-stop-loading', () => {
-      $('#w-loading').classList.remove('on');
-      updateWebNav();
-    });
-    const onNav = e => {
-      WEB.lastUrl = e.url || wv.getURL();
-      $('#w-url').value = /^about:blank/i.test(WEB.lastUrl) ? '' : WEB.lastUrl;
-      $('#w-empty').style.display = /^https?:/i.test(WEB.lastUrl) ? 'none' : '';
-      S.state.settings.webSearch.url = WEB.lastUrl;
-      save();
-    };
-    wv.addEventListener('did-navigate', onNav);
-    wv.addEventListener('did-navigate-in-page', onNav);
-    wv.addEventListener('new-window', e => { if (e.url) wv.loadURL(e.url); });
-    wv.addEventListener('page-title-updated', e => { $('#tb-title').textContent = '网页 · ' + (e.title || '').slice(0, 26); });
-
-    $('#w-back').onclick = () => { try { if (wv.canGoBack()) wv.goBack(); } catch (e) {} };
-    $('#w-fwd').onclick = () => { try { if (wv.canGoForward()) wv.goForward(); } catch (e) {} };
-    $('#w-reload').onclick = () => { try { wv.reload(); } catch (e) {} };
-    $('#w-go').onclick = () => webGo($('#w-url').value.trim());
-    $('#w-url').addEventListener('keydown', e => { if (e.key === 'Enter') webGo(e.target.value.trim()); });
-    $('#w-engine').onchange = e => { S.state.settings.webSearch.engine = e.target.value; save(true); };
-    $('#w-sniff').onclick = () => sniffCurrentPage();
-    $$('#w-empty [data-we]').forEach(b => b.onclick = async () => {
-      const t = b.dataset.we;
-      if (t === 'paste') {
-        try {
-          const txt = await navigator.clipboard.readText();
-          if (txt && txt.trim()) webGo(txt.trim());
-          else toast('剪贴板是空的');
-        } catch (e) { toast('读不到剪贴板，手动粘贴到地址栏吧'); }
-        return;
-      }
-      webGo(t);
-    });
-    $('#w-empty').style.display = /^https?:/i.test(WEB.lastUrl || S.state.settings.webSearch.url || '') ? 'none' : '';
-    updateWebNav();
   }
 
   /* ================= 手机端网页搜书（抓取式） =================
@@ -1040,7 +1586,7 @@
     return document.documentElement.classList.contains('is-android');
   }
 
-  const WA = { built: false, stack: [], busy: false, lastUrl: '' };
+  const WA = { built: false, stack: [], busy: false, lastUrl: '', query: '', upTok: 0, elapsed: 0 };
 
   function hostOf(u) {
     try { return new URL(u).host.replace(/^www\./, ''); } catch (e) { return ''; }
@@ -1074,50 +1620,37 @@
     return (ENGINES[eng] || ENGINES.bing)(s);
   }
 
-  function renderWebMobile() {
-    if (WA.built) return;
-    WA.built = true;
-    WEB.built = true;
-    const eng = S.state.settings.webSearch.engine || 'bing';
-    const v = $('#view-web');
-    v.innerHTML = `
-      <div class="wa-bar">
-        <input id="wa-input" class="wa-input" spellcheck="false" enterkeyhint="search"
-               placeholder="输入书名，或粘贴小说站网址">
-        <button class="btn sm primary" id="wa-go">搜索</button>
-      </div>
-      <div class="wa-tools">
-        <select id="wa-engine" class="wa-engine" title="搜索引擎">
-          ${[['bing', '必应'], ['baidu', '百度'], ['sogou', '搜狗'], ['so360', '360']]
-            .map(([k, n]) => `<option value="${k}" ${eng === k ? 'selected' : ''}>${n}</option>`).join('')}
-        </select>
-        <button class="btn xs" id="wa-paste">粘贴网址</button>
-        <button class="btn xs" id="wa-back" disabled>← 返回</button>
+  /* 搜索结果页里的「网页」模式：抓一页、按书归并成卡片，落在 #search-results 里。
+     和书源搜索共用同一个结果区，卡片样式也一样。 */
+  async function runWebSearch(kw, seq) {
+    const box = $('#search-results');
+    if (!box) return;
+    const engName = (ENGINE_NAMES.find(e => e[0] === webEngine()) || [, '必应'])[1];
+    const sub = $('#search-sub');
+    if (sub) sub.textContent = `网页 · ${engName} · 抓取后在本机识别`;
+    box.innerHTML = `<div class="wa-tools">
+        <button class="btn xs" id="wa-back" disabled>← 返回上一页</button>
+        <span class="wa-hint-s">搜不到就换个引擎，或直接把小说站的目录页网址粘进来</span>
       </div>
       <div class="wa-list" id="wa-list"></div>`;
-    $('#wa-go').onclick = () => waFetch($('#wa-input').value);
-    $('#wa-input').addEventListener('keydown', e => { if (e.key === 'Enter') waFetch(e.target.value); });
-    $('#wa-engine').onchange = e => { S.state.settings.webSearch.engine = e.target.value; save(true); };
-    $('#wa-paste').onclick = async () => {
-      try {
-        const t = ((await navigator.clipboard.readText()) || '').trim();
-        if (!t) return toast('剪贴板是空的');
-        $('#wa-input').value = t;
-        waFetch(t);
-      } catch (e) { toast('读不到剪贴板，长按输入框粘贴吧'); }
-    };
-    $('#wa-back').onclick = () => {
+    WA.stack = [];
+    WA.busy = false;
+    WA.lastUrl = '';
+    const back = $('#wa-back');
+    if (back) back.onclick = () => {
       const prev = WA.stack.pop();
-      $('#wa-back').disabled = !WA.stack.length;
+      if (back) back.disabled = !WA.stack.length;
       if (prev) waFetch(prev, true);
-      else waHome();
     };
-    waHome();
+    await waFetch(kw);
+    if (seq !== searchSeq) return;
   }
 
   function waHome() {
     WA.lastUrl = '';
-    $('#wa-list').innerHTML = `
+    const box = $('#wa-list');
+    if (!box) return;
+    box.innerHTML = `
       <div class="wa-home">
         <div class="wa-home-t">网页搜书</div>
         <div class="wa-home-s">输入书名用搜索引擎找站，或把小说站的目录页地址直接粘进来。
@@ -1132,17 +1665,23 @@
     if (!raw || WA.busy) return;
     const url = resolveWebUrl(raw);
     const list = $('#wa-list');
+    if (!list) return;                       // 已经离开搜索页
     if (!isBack && WA.lastUrl && WA.lastUrl !== url) {
       WA.stack.push(WA.lastUrl);
       if (WA.stack.length > 12) WA.stack.shift();
     }
-    $('#wa-back').disabled = !WA.stack.length;
-    $('#wa-input').value = raw;
+    const backBtn = $('#wa-back');
+    if (backBtn) backBtn.disabled = !WA.stack.length;
+    const inp = $('#wa-input');
+    if (inp) inp.value = raw;
+    WA.query = isUrlLike(raw) ? '' : raw;
     WA.busy = true;
+    WA.upTok = (WA.upTok || 0) + 1;
     list.innerHTML = `<div class="wa-loading"><i></i><span>正在抓取 ${esc(hostOf(url) || '页面')} …</span></div>`;
+    const t0 = Date.now();
     let r;
     try {
-      r = await mo.net({ url, charset: 'auto' });
+      r = await netGet({ url, charset: 'auto', timeout: 15000 });
     } catch (e) {
       r = { ok: false, error: e.message || String(e) };
     }
@@ -1161,28 +1700,54 @@
     const finalUrl = r.url || url;
     WA.lastUrl = finalUrl;
     const txt = r.text || '';
-    /* 被反爬拦下来的页面通常很短且带验证字样，直接说清楚，别让用户以为是站点没内容。
-       阈值放宽到 9000：搜狗的拦截页有 5KB 多，只是正文较长的正常页面不会有这些字样。 */
-    if (txt.length < 9000 && /安全验证|人机验证|验证码|captcha|访问异常|拒绝访问|滑动验证|反爬/i.test(txt)) {
+    /* 被反爬拦下来的页面通常很短且带验证字样，直接说清楚，别让用户以为是站点没内容 */
+    const blocked = Engine.pageBlocked(txt, (txt.match(/<title>([\s\S]*?)<\/title>/i) || [])[1]);
+    if (blocked) {
       list.innerHTML = `
         <div class="wa-card bad">
           <div class="wa-card-t">这个站拦了自动抓取</div>
-          <div class="wa-card-s">${esc(hostOf(finalUrl))} 要求人机验证，换个搜索引擎或换一家站点试试。</div>
+          <div class="wa-card-s">${esc(hostOf(finalUrl))} ${blocked === 'cloudflare' ? '走了 Cloudflare 人机验证' : '要求人机验证'}，换个搜索引擎或换一家站点试试。</div>
         </div>
         <div class="wa-src">${esc(hostOf(finalUrl))}</div>`;
       return;
     }
+    const serpHint = isSerpUrl(finalUrl) || !WA.query;
     let d;
     try {
-      d = Engine.detectPage(txt, finalUrl);
+      /* 搜索页只要链接：跳过目录/正文/漫画那一圈，页面再大也是毫秒级 */
+      d = Engine.detectPage(txt, finalUrl, serpHint ? { light: true } : undefined);
     } catch (e) {
-      d = { info: {}, toc: null, content: null, links: [], title: '' };
+      d = { info: {}, toc: null, content: null, links: [], title: '', serp: false };
     }
-    renderWaResult(d, finalUrl, isSerpUrl(finalUrl));
+    WA.elapsed = Date.now() - t0;
+    renderWaResult(d, finalUrl, isSerpUrl(finalUrl) || !!d.serp, { html: txt, upgrading: !d.toc || (d.toc.chapters || []).length < 15 });
+    /* 详情页常常只挂十来章「最新章节」：先把页面画出来，再后台把真目录补上 */
+    if (!d.serp && !isSerpUrl(finalUrl)) upgradeWa(finalUrl, d, txt);
   }
 
-  function renderWaResult(d, url, serp) {
+  /** 后台补全目录：升级后如果章数变多/多出正文，就重画一次 */
+  async function upgradeWa(url, d, html) {
+    const tok = WA.upTok || 0;
+    const t0 = Date.now();
+    if (d.toc && d.toc.chapters.length >= 30) return;
+    const box = $('#wa-list');
+    const card = box && box.querySelector('.wa-card.ok [data-up-tip], .wa-card.ok .wa-up-tip');
+    if (card) card.textContent = '正在补全目录…';
+    let res;
+    try {
+      res = await Engine.sniffBook(netGet, url, { page: html ? { html, url } : null, detected: d, timeout: 15000 });
+    } catch (e) { return; }
+    if (tok !== (WA.upTok || 0)) return;              // 用户已经翻到别的页面了
+    const before = d.toc ? d.toc.chapters.length : 0;
+    const after = res.d.toc ? res.d.toc.chapters.length : 0;
+    if (after <= before && !(!d.content && res.d.content)) return;
+    renderWaResult(res.d, res.url, false, { noUpgrade: true, elapsed: Date.now() - t0 });
+  }
+
+  function renderWaResult(d, url, serp, opts) {
     const list = $('#wa-list');
+    if (!list) return;
+    const o = opts || {};
     const host = hostOf(url);
     /* 引擎自己认出这是搜索结果页时也算数（各家域名太多，光靠 URL 判断会漏） */
     serp = serp || !!d.serp;
@@ -1202,197 +1767,241 @@
       /* 只剩一个域名（baidu.com）的条目对用户没有意义，宁可不显示 */
       .filter(l => l.title && !WA_NAV.test(l.title) && !/^[\w-]+(\.[\w-]+)+$/.test(l.title))
       .slice(0, 40);
-    const readable = !serp && !!(d.toc || d.content);
     const tocN = d.toc ? d.toc.chapters.length : 0;
     const chars = d.content ? d.content.chars : 0;
+    const comicN = d.comic ? d.comic.count : 0;
     const name = (d.info && d.info.name) || d.title || host || '未识别书名';
-    const card = readable
-      ? `<div class="wa-card ok">
+    const author = (d.info && d.info.author) || '';
+    const elapsed = o.elapsed != null ? o.elapsed : (WA.elapsed || 0);
+
+    /* ---------- 搜索页：按「书」归并成卡片，站点做成标签（跟书源搜索一致） ---------- */
+    if (serp) {
+      const key = WA.query || '';
+      const books = Engine.serpBooks(d.links || [], key);
+      const others = books.length ? [] : links.slice(0, 20);
+      const secs = elapsed ? ` · ${(elapsed / 1000).toFixed(1)}s` : '';
+      const head = `<div class="wa-src">${esc(host)} · ${books.length
+        ? `${books.length} 本书 · 同一本在多个站会合成一张卡`
+        : '没在这一页读到书'}${secs}</div>`;
+      if (!books.length) {
+        list.innerHTML = head + `
+          <div class="wa-card bad">
+            <div class="wa-card-t">这一页没读出能读的书</div>
+            <div class="wa-card-s">可能是搜索引擎限流，或结果页版式变了。换个引擎再搜一次，或换一个短一点的关键词；
+              如果结果里有「XX小说网」，也可以直接点下面的链接进去。</div>
+          </div>
+          ${links.length ? `<div class="wa-label">页面里的链接 · ${links.length}</div>
+            <div class="wa-items">${waItemHtml(links, 0)}</div>` : ''}`;
+        bindWaItems(links);
+        return;
+      }
+      list.innerHTML = head + `<div class="wb-tip">点站点标签换站 · 「预览」可以先看目录和正文再决定</div>
+        <div class="wb-list">${books.map((g, i) => {
+        const first = g.sites[0];
+        return `<div class="wb-card" data-bi="${i}" data-cur="${esc(first.url)}">
+          <div class="wb-head">
+            <div class="wb-cover">${esc((g.name || '?')[0])}</div>
+            <div class="wb-info">
+              <div class="wb-name">${esc(g.name)}</div>
+              <div class="wb-sub">${esc(g.author || '佚名')}${g.sites.length > 1 ? ` · ${g.sites.length} 个站` : ''}</div>
+              <div class="wb-sites">${g.sites.map((s, j) => `<button class="wb-site${j === 0 ? ' on' : ''}" data-bs="${i}:${j}" data-u="${esc(s.url)}">${esc(s.label)}</button>`).join('')}</div>
+            </div>
+          </div>
+          <div class="wb-act">
+            <button class="btn sm primary" data-bp="${i}">预览</button>
+            <button class="btn sm" data-ba="${i}">加入书架</button>
+          </div>
+        </div>`;
+      }).join('')}</div>
+      ${links.length ? `<button class="wa-more" id="wa-more">全部 ${links.length} 条原始结果（含百科、视频等）</button>
+        <div class="wa-items" id="wa-others" hidden>${waItemHtml(links, 0)}</div>` : ''}`;
+
+      $$('[data-bs]').forEach(el => el.onclick = e => {
+        e.stopPropagation();
+        const card = el.closest('.wb-card');
+        $$('.wb-site', card).forEach(x => x.classList.remove('on'));
+        el.classList.add('on');
+        card.dataset.cur = el.dataset.u;
+      });
+      $$('[data-bp]').forEach(b => b.onclick = e => {
+        e.stopPropagation();
+        const card = b.closest('.wb-card');
+        previewWebBook(card.dataset.cur);
+      });
+      $$('[data-ba]').forEach(b => b.onclick = async e => {
+        e.stopPropagation();
+        const u = b.closest('.wb-card').dataset.cur;
+        b.disabled = true; b.textContent = '分析中…';
+        try { await addWebBook(u); b.textContent = '已加入'; b.classList.add('done'); }
+        catch (err) { b.disabled = false; b.textContent = '加入书架'; toast('加入失败：' + (err.message || err)); }
+      });
+      const more = $('#wa-more');
+      if (more) more.onclick = () => {
+        const box = $('#wa-others');
+        box.hidden = !box.hidden;
+        more.textContent = box.hidden ? `全部 ${links.length} 条原始结果（含百科、视频等）` : '收起原始结果';
+      };
+      bindWaItems(links);
+      return;
+    }
+
+    /* ---------- 普通页面：目录页 / 漫画页 / 单页正文 ---------- */
+    const readable = !!(d.toc || d.content);
+    const partial = tocN > 0 && tocN < 15 && !o.noUpgrade;
+    let card;
+    if (tocN >= 3) {
+      card = `<div class="wa-card ok">
            <div class="wa-card-t">${esc(String(name).slice(0, 40))}</div>
-           <div class="wa-card-s">${tocN ? `目录 ${tocN} 章` : '未识别到目录'}${chars ? ` · 正文 ${chars} 字` : ''}</div>
+           <div class="wa-card-s">${esc(author || '佚名')} · 目录 ${tocN} 章${comicN ? ` · 图片 ${comicN} 张` : ''}${chars ? ` · 正文 ${chars} 字` : ''}</div>
+           ${partial ? '<div class="wa-up-tip">正在补全目录…</div>' : ''}
            <div class="wa-card-a">
              <button class="btn sm primary" id="wa-add">加入书架</button>
+             <button class="btn sm" id="wa-prev2">预览</button>
              ${d.toc ? `<button class="btn sm" id="wa-add-toc">只导入目录</button>` : ''}
            </div>
-         </div>`
-      : `<div class="wa-card bad">
-           <div class="wa-card-t">${serp ? (links.length ? `搜索到 ${links.length} 个结果` : '这一页没读出结果') : '这一页没有直接的目录或正文'}</div>
-           <div class="wa-card-s">${serp
-             ? (links.length ? '点下面的条目进站，能读的话会自动认出来' : '搜索引擎的页面版式经常变，也可能是被限流了。换「必应」再搜一次，或把小说站的目录页地址直接粘进来')
-             : (links.length ? '多半是详情页：点下面「查看目录」再嗅探一次，或者直接试着加入书架' : '换个链接，或把目录页地址直接粘进来')}</div>
-           ${!serp && links.length ? `<div class="wa-card-a"><button class="btn sm" id="wa-add">试着加入书架</button></div>` : ''}
          </div>`;
+    } else if (comicN >= 2) {
+      card = `<div class="wa-card ok">
+           <div class="wa-card-t">${esc(String(name).slice(0, 40))} <span class="chip">漫画</span></div>
+           <div class="wa-card-s">这一页是漫画图（${comicN} 张），没有目录。加入后按「单话」读，翻页看下一话要回到目录页重新加。</div>
+           <div class="wa-card-a">
+             <button class="btn sm primary" id="wa-add">加入书架（就这一话）</button>
+             <button class="btn sm" id="wa-prev2">预览</button>
+           </div>
+         </div>`;
+    } else if (chars && !d.content.weak) {
+      card = `<div class="wa-card bad">
+           <div class="wa-card-t">这一页是一篇网页正文，不是书的目录</div>
+           <div class="wa-card-s">${esc(String(name).slice(0, 30))} · ${chars} 字。加入后只有这一页，不能按章翻。建议先找到这本书的目录页（下面带「目录 / 章节列表」的条目），再从那页加。</div>
+           <div class="wa-card-a"><button class="btn sm" id="wa-add">仍然按单页加入</button></div>
+         </div>`;
+    } else {
+      card = `<div class="wa-card bad">
+           <div class="wa-card-t">这一页没有目录或正文</div>
+           <div class="wa-card-s">${(partial || o.upgrading) ? '正在找这本书的目录…' : (links.length ? '多半是书籍详情页：点下面「目录」那类条目进目录页，或直接用下面的结果预览' : '换个链接，或把小说站的目录页地址直接粘进来')}</div>
+         </div>`;
+    }
+    /* 认出来是一本书之后，页面上那些「武侠仙侠 / 作品百科」的导航链接就没用了，
+       默认收起来，免得把书卡挤下去 */
     list.innerHTML = `
-      <div class="wa-src">${esc(hostOf(url))}</div>
+      <div class="wa-src">${esc(host)}${readable ? '' : ' · 只作浏览'}${elapsed ? ` · ${(elapsed / 1000).toFixed(1)}s` : ''}</div>
       ${card}
-      ${links.length ? `<div class="wa-label">页面里的链接 · ${links.length}</div>
-        <div class="wa-items">
-          ${links.map((l, i) => `<button class="wa-item" data-wa-open="${i}">
-            <span class="wa-item-t">${esc(l.title)}</span>
-            <span class="wa-item-u">${esc(hostOf(l.url) || '')}</span>
-          </button>`).join('')}
-        </div>` : ''}`;
+      ${links.length ? `<button class="wa-more" id="wa-links">页面里的链接 · ${links.length}</button>
+        <div class="wa-items" id="wa-links-box" ${readable ? 'hidden' : ''}>${waItemHtml(links, 0)}</div>` : ''}`;
+    const lk = $('#wa-links');
+    if (lk) lk.onclick = () => {
+      const box2 = $('#wa-links-box');
+      box2.hidden = !box2.hidden;
+      lk.textContent = box2.hidden ? `页面里的链接 · ${links.length}` : '收起页面里的链接';
+    };
+
     const addBtn = $('#wa-add');
     if (addBtn) {
       addBtn.onclick = async () => {
         addBtn.disabled = true; addBtn.textContent = '分析中…';
-        try { await addWebBook(url, readable ? d : null); addBtn.textContent = '已加入'; }
-        catch (e) { addBtn.disabled = false; addBtn.textContent = '加入书架'; toast('加入失败：' + (e.message || e)); }
+        try {
+          await addWebBook(url, readable ? d : null);
+          addBtn.textContent = '已加入';
+        } catch (e) {
+          addBtn.disabled = false;
+          addBtn.textContent = '加入书架';
+          toast('加入失败：' + (e.message || e));
+        }
       };
     }
+    const pv2 = $('#wa-prev2');
+    if (pv2) pv2.onclick = () => previewWebBook(url, { d, url });
     const at = $('#wa-add-toc');
     if (at) at.onclick = () => addWebBook(url, d, true);
+    bindWaItems(links);
+  }
+
+  function waItemHtml(links) {
+    return links.map((l, i) => `<span class="wa-item" data-wa-open="${i}">
+            <span class="wa-item-t">${esc(l.title)}</span>
+            <span class="wa-item-u">${esc(hostOf(l.url) || '')}</span>
+            <span class="wa-item-a">
+              <button class="btn xs primary" data-wa-prev="${i}">预览</button>
+              <button class="btn xs" data-wa-add="${i}">加入书架</button>
+            </span>
+          </span>`).join('');
+  }
+
+  function bindWaItems(links) {
     $$('[data-wa-open]').forEach(el => {
-      el.onclick = () => waFetch(links[+el.dataset.waOpen].url);
+      el.onclick = e => {
+        if (e.target.closest('button')) return;
+        waFetch(links[+el.dataset.waOpen].url);
+      };
     });
-  }
-
-  function updateWebNav() {
-    const wv = WEB.view;
-    if (!wv) return;
-    try {
-      $('#w-back').disabled = !wv.canGoBack();
-      $('#w-fwd').disabled = !wv.canGoForward();
-    } catch (e) { /* 未就绪 */ }
-  }
-
-  function webGo(input) {
-    if (!input) return;
-    const wv = WEB.view;
-    if (!wv) return;
-    let url;
-    if (isUrlLike(input)) {
-      url = input.startsWith('http') ? input : 'https://' + input;
-    } else {
-      const eng = S.state.settings.webSearch.engine || 'bing';
-      url = (ENGINES[eng] || ENGINES.bing)(input);
-    }
-    wv.loadURL(url);
-    $('#w-url').value = url;
-    $('#w-panel').classList.remove('open');
-  }
-
-  async function webviewHtml() {
-    const wv = WEB.view;
-    if (!wv) return '';
-    try {
-      return await wv.executeJavaScript('document.documentElement.outerHTML', true);
-    } catch (e) {
-      return '';
-    }
-  }
-
-  async function sniffCurrentPage() {
-    const wv = WEB.view;
-    if (!wv) return;
-    const panel = $('#w-panel');
-    panel.classList.add('open');
-    panel.innerHTML = `<div class="wp-head">正在分析页面…</div>`;
-    let url = '';
-    try { url = wv.getURL(); } catch (e) { url = WEB.lastUrl; }
-    const html = await webviewHtml();
-    if (!html) {
-      panel.innerHTML = `<div class="wp-head">读不到页面内容</div><div class="wp-body"><p class="hint">页面还没加载完，或该站点禁止读取。稍等一下再试。</p></div>`;
-      return;
-    }
-    const d = Engine.detectPage(html, url);
-    paintSniff(d, url);
-  }
-
-  function paintSniff(d, url) {
-    const panel = $('#w-panel');
-    const tocInfo = d.toc ? `识别到目录 ${d.toc.chapters.length} 章` : '未识别到目录';
-    const contentInfo = d.content ? `正文 ${d.content.chars} 字` : '未识别到正文';
-    const readable = !!(d.toc || d.content);
-    const author = (d.links.length > 1 ? '' : d.info.author); // 列表页上的「作者：X」往往是某一本书的，不显示
-    panel.innerHTML = `
-      <div class="wp-head">本页分析 <button class="wbtn" id="wp-close" title="关闭">×</button></div>
-      <div class="wp-body">
-        <div class="wp-card">
-          <div class="wp-title">${esc(d.info.name || d.title || '未识别书名')}</div>
-          <div class="wp-sub">${author ? esc(author) + ' · ' : ''}${tocInfo} · ${contentInfo}</div>
-          <div class="wp-act">
-            <button class="btn sm primary" id="wp-add-page" ${readable ? '' : 'disabled'}>把本页加为书</button>
-            ${d.toc ? `<button class="btn sm" id="wp-add-toc">只导入目录（${d.toc.chapters.length} 章）</button>` : ''}
-          </div>
-          ${readable ? '' : '<div class="hint" style="margin-top:8px">这一页没有目录也没有正文，可以点下面的书籍链接进去再嗅探。</div>'}
-        </div>
-        <div class="wp-label">本页的书籍链接 · ${d.links.length}</div>
-        <div class="wp-list">
-          ${d.links.length ? d.links.map((l, i) => `
-            <div class="wp-item">
-              <div class="wp-item-t" title="${esc(l.title)}">${esc(l.title)}</div>
-              <div class="wp-item-a">
-                <button class="btn xs" data-wp-open="${i}">打开</button>
-                <button class="btn xs primary" data-wp-add="${i}">加书架</button>
-              </div>
-            </div>`).join('') : '<div class="hint">这一页没找到像书籍的链接。试试打开书的详情页，或直接粘贴目录页地址。</div>'}
-        </div>
-      </div>`;
-    $('#wp-close').onclick = () => panel.classList.remove('open');
-    $('#wp-add-page').onclick = () => addWebBook(url, d);
-    const at = $('#wp-add-toc');
-    if (at) at.onclick = () => addWebBook(url, d, true);
-    $$('[data-wp-open]').forEach(b => b.onclick = () => {
-      WEB.view.loadURL(d.links[+b.dataset.wpOpen].url);
-      panel.classList.remove('open');
+    /* 网页搜出来的每一条也能先预览再决定加不加，跟书源搜索一致 */
+    $$('[data-wa-prev]').forEach(b => b.onclick = e => {
+      e.stopPropagation();
+      previewWebBook(links[+b.dataset.waPrev].url);
     });
-    $$('[data-wp-add]').forEach(b => b.onclick = async () => {
+    $$('[data-wa-add]').forEach(b => b.onclick = async e => {
+      e.stopPropagation();
       b.disabled = true; b.textContent = '分析中…';
-      await addWebBook(d.links[+b.dataset.wpAdd].url);
-      b.textContent = '已加入';
+      try { await addWebBook(links[+b.dataset.waAdd].url); b.textContent = '已加入'; }
+      catch (err) { b.disabled = false; b.textContent = '加入书架'; toast('加入失败：' + (err.message || err)); }
     });
   }
 
   /** 把一个网页地址变成书架里的书：抓页面 → 找目录/正文 → 生成规则 */
+  /**
+   * 漫画单页站：顺着「下一话 / 下一章」把后面几话串起来（最多 12 话）。
+   * 不加这一步，加了书架也只有一页图，读者每话都得回浏览器里重新加一次。
+   */
+  async function expandComicChain(startUrl, d0) {
+    const out = [{ title: (d0.info.name || d0.title || '第1话').trim().slice(0, 40), url: startUrl }];
+    const seen = new Set([startUrl]);
+    let curUrl = startUrl, curHtml = d0.__html || '';
+    for (let i = 0; i < 12; i++) {
+      if (!curHtml) {
+        const r = await netGet({ url: curUrl, charset: 'auto' }).catch(() => null);
+        if (!r || r.ok === false) break;
+        curHtml = r.text;
+      }
+      const next = Engine.nextChapterLink(curHtml, curUrl);
+      if (!next || seen.has(next)) break;
+      seen.add(next);
+      const r2 = await netGet({ url: next, charset: 'auto' }).catch(() => null);
+      if (!r2 || r2.ok === false) break;
+      const dd = Engine.detectPage(r2.text, r2.url || next);
+      if (dd.serp) break;
+      const t = (dd.info.name || dd.title || '').trim().slice(0, 40) || ('第' + (out.length + 1) + '话');
+      out.push({ title: t, url: r2.url || next });
+      curUrl = r2.url || next;
+      curHtml = r2.text;
+    }
+    return out;
+  }
+
   async function addWebBook(url, detected, forceToc) {
     if (!url) return;
     const exists = S.state.books.find(b => b.bookUrl === url);
     if (exists) { toast('这本已经在书架里了'); return exists; }
+    /* 搜索结果页 / 首页 / 分类页不是书：加进去就是「只能看网站首页」那种假书 */
+    if (isSerpUrl(url)) throw new Error('这是搜索结果页，不是书；先点进书籍详情页再添加');
 
-    let d = detected;
-    if (!d) {
-      const r = await mo.net({ url, charset: 'auto' });
-      if (!r.ok) return toast('打不开这个地址：' + r.error);
-      d = Engine.detectPage(r.text, r.url || url);
-    }
-
-    // 详情页找不到目录 → 找「目录/章节」链接再抓一次
-    if (!d.toc) {
-      const r = await mo.net({ url, charset: 'auto' });
-      if (r.ok) {
-        const doc = new DOMParser().parseFromString(r.text, 'text/html');
-        const link = [...doc.querySelectorAll('a[href]')].find(a => /^(目录|章节列表|查看目录|全部章节|章节目录)$/.test((a.textContent || '').trim()));
-        if (link) {
-          const tocUrl = Engine.absUrl(r.url || url, link.getAttribute('href'));
-          const r2 = await mo.net({ url: tocUrl, charset: 'auto' });
-          if (r2.ok) {
-            const d2 = Engine.detectPage(r2.text, r2.url || tocUrl);
-            if (d2.toc) d = Object.assign({}, d, { toc: d2.toc, content: d.content || d2.content });
-          }
-        }
-      }
-    }
-
-    if (!d.toc && !d.content) return toast('这个页面里没找到可读的目录或正文');
-
-    // 目录页/详情页里没有正文 → 抓第一章，把正文容器规则也嗅出来
-    if (!d.content && d.toc && d.toc.chapters.length) {
-      try {
-        const rc = await mo.net({ url: d.toc.chapters[0].url, charset: 'auto' });
-        if (rc.ok) {
-          const dc = Engine.detectPage(rc.text, rc.url || d.toc.chapters[0].url);
-          if (dc.content) d = Object.assign({}, d, { content: dc.content });
-        }
-      } catch (e) { /* 抓不到就靠引擎的兜底抽取 */ }
-    }
+    /* 目录、正文规则、漫画判定一次嗅完；同一页刚才预览过，这里基本全命中缓存 */
+    const res = await Engine.sniffBook(netGet, url, { detected: detected || null, timeout: 15000 });
+    const d = res.d;
+    url = res.url || url;
+    if (d.serp) throw new Error('这一页是搜索结果，点进书籍页面再加');
+    if (!d.toc && !d.content) throw new Error('这个页面里没有找到目录或正文；如果是详情页，先点「目录」进去再加');
 
     const name = (d.info.name || d.title || '未命名').replace(/[_-].*$/, '').trim().slice(0, 40) || '未命名';
-    const chapters = d.toc ? d.toc.chapters : (d.content ? [{ title: name, url }] : []);
+    /* 有目录 = 按章读；没目录但有图 = 漫画，先顺着「下一话」把后面几话串起来 */
+    const isComic = !d.toc && !!(d.comic && d.comic.count >= 2);
+    let chapters;
+    if (d.toc) chapters = d.toc.chapters;
+    else if (isComic) chapters = await expandComicChain(url, d);
+    else chapters = [{ title: name + '（单页）', url }];
     const book = {
-      id: uid('W'), name, author: d.info.author || '佚名', kind: 'web',
-      bookUrl: url, sourceName: '网页抓取', intro: '',
-      cover: '', total: chapters.length,
+      id: uid('W'), name, author: d.info.author || '佚名', kind: isComic ? 'comic' : 'web',
+      bookUrl: url, sourceName: isComic ? '网页抓取 · 漫画' : '网页抓取',
+      intro: d.info.intro || '', cover: d.info.coverUrl || '', total: chapters.length,
       chapters,
       webRule: {
         toc: d.toc ? d.toc.rule : null,
@@ -1402,19 +2011,24 @@
       groupId: 'g_default', createdAt: Date.now(), updatedAt: Date.now()
     };
 
-    if (!book.chapters.length && forceToc) return toast('这一页没有目录');
+    if (!book.chapters.length && forceToc) throw new Error('这一页没有目录');
 
     upsertBook(book);
     renderShelf();
-    toast(`已加入《${book.name}》${book.total ? '· ' + book.total + ' 章' : '（无目录，将按单页阅读）'}`);
+    toast(isComic
+      ? `已加入《${book.name}》· 漫画单话（只有这一页）`
+      : `已加入《${book.name}》${book.total > 1 ? '· ' + book.total + ' 章' : '（单页）'}`);
     return book;
   }
 
-  /** 书的取源对象：网页书用自己嗅探出来的规则 */
+  /** 书的取源对象：网页书 / 网页漫画用自己嗅探出来的规则 */
   function srcForBook(b) {
-    if (b.kind === 'web') {
+    if (b.kind === 'web' || b.kind === 'comic') {
+      const site = b.webRule?.siteUrl || '';
       return {
-        id: '__web', name: b.sourceName || '网页抓取', charset: 'auto', url: b.webRule?.siteUrl || '',
+        id: '__web', name: b.sourceName || '网页抓取', charset: 'auto', url: site,
+        /* 漫画站基本都校验 Referer，不带就只给防盗链占位图 */
+        headers: site ? { Referer: site + '/' } : undefined,
         ruleSearch: {}, ruleBookInfo: {}, ruleToc: b.webRule?.toc || {}, ruleContent: b.webRule?.content || {}
       };
     }
@@ -1462,8 +2076,15 @@
     });
   }
 
-  function renderSources() {
-    const v = $('#view-sources');
+  function renderSources(host) {
+    /* 书源页现在长在「扩展」里：只有当前真的停在书源页时才重画，
+       否则（比如在设置页改了书源）不要往隐藏容器里塞内容 */
+    if (!host) {
+      if (!(S.view === 'ext' && S.ext === 'sources')) return;
+      host = $('#ext-body');
+    }
+    const v = host;
+    if (!v) return;
     const st = S.state;
     const onCount = st.sources.filter(s => s.enabled).length;
     const groups = [...new Set(st.sources.map(s => s.group || '未分组'))].sort();
@@ -1604,7 +2225,7 @@
       el.disabled = true; el.textContent = '测试中';
       try {
         const t0 = performance.now();
-        const r = await withTimeout(Engine.search(mo.net, s, '我的'), 10000);
+        const r = await withTimeout(Engine.search(netGet, s, '我的'), 10000);
         s.lastTest = Date.now(); s.lastLatency = Math.round(performance.now() - t0); s.lastCount = r.length; s.lastError = '';
         toast(r.length ? `「${s.name}」可用 · 搜到 ${r.length} 条` : `「${s.name}」能连通，但没搜到结果（检查搜索规则）`);
       } catch (e) {
@@ -1960,37 +2581,16 @@
     };
   }
 
-  /* ---------------- 书签 ---------------- */
-  function renderBookmarks() {
-    const v = $('#view-bookmarks');
-    const list = [...S.state.bookmarks].sort((a, b) => b.at - a.at);
-    v.innerHTML = `<div class="page-head"><h1>书签</h1><span class="sub">${list.length} 条</span></div>
-      <div class="list">${list.length ? list.map(b => `
-        <div class="row-card">
-          <div class="ico">书</div>
-          <div class="body">
-            <div class="t">${esc(b.name)} <span class="chip">${esc(b.title || '')}</span></div>
-            <div class="s">${esc(b.text || '')}</div>
-            <div class="s">${fmtWhen(b.at)}</div>
-          </div>
-          <div class="act">
-            <button class="btn sm" data-jump="${b.id}">跳转</button>
-            <button class="btn sm danger" data-rmbm="${b.id}">删除</button>
-          </div>
-        </div>`).join('') : `<div class="empty">阅读时点顶栏的书签图标即可添加。<br>书签会记下章节和当时看到的位置。</div>`}</div>`;
-    $$('[data-jump]').forEach(el => el.onclick = () => {
-      const bm = S.state.bookmarks.find(x => x.id === el.dataset.jump);
-      openReader(bm.bookId, bm.ci, bm.pct);
-    });
-    $$('[data-rmbm]').forEach(el => el.onclick = () => {
-      S.state.bookmarks = S.state.bookmarks.filter(x => x.id !== el.dataset.rmbm);
-      save(true); renderBookmarks(); toast('已删除书签');
-    });
-  }
+  /* 书签不再是独立页面：它按书归属，放在阅读器的目录面板里（见 buildBookmarks） */
 
-  /* ---------------- 历史 ---------------- */
-  function renderHistory() {
-    const v = $('#view-history');
+  /* ---------------- 阅读历史 ---------------- */
+  function renderHistory(host) {
+    if (!host) {
+      if (!(S.view === 'ext' && S.ext === 'history')) return;
+      host = $('#ext-body');
+    }
+    const v = host;
+    if (!v) return;
     const list = S.state.history;
     const groups = {};
     list.forEach(h => { const k = dayKey(new Date(h.at)); (groups[k] = groups[k] || []).push(h); });
@@ -2008,7 +2608,7 @@
       </div>`;
     $$('[data-hjump]').forEach(el => el.onclick = () => {
       const h = S.state.history.find(x => x.id === el.dataset.hjump);
-      openReader(h.bookId, h.ci);
+      openReader(h.bookId, h.ci, null, h.title);
     });
     const c = $('#clear-hist');
     if (c) c.onclick = () => {
@@ -2017,9 +2617,14 @@
     };
   }
 
-  /* ---------------- 统计 ---------------- */
-  function renderStats() {
-    const v = $('#view-stats');
+  /* ---------------- 阅读统计 ---------------- */
+  function renderStats(host) {
+    if (!host) {
+      if (!(S.view === 'ext' && S.ext === 'stats')) return;
+      host = $('#ext-body');
+    }
+    const v = host;
+    if (!v) return;
     const stats = S.state.stats || {};
     const today = stats[dayKey()] || { sec: 0, chars: 0 };
     const week = [];
@@ -2082,7 +2687,7 @@
         </div>
 
         <div class="card">
-          <h3>朗读 <span class="chip">${IS_ANDROID ? '系统语音' : 'Windows 系统语音'}</span></h3>
+          <h3>朗读 <span class="chip">${IS_ANDROID ? '系统语音' : OS_NAME() + ' 系统语音'}</span></h3>
           <div class="row"><div class="rl">音色 / 语速 / 音调<small id="tts-cur">${esc(ttsCurrentLabel())}</small></div>
             <button class="btn sm" id="s-tts">设置</button></div>
           <div class="row"><div class="rl">读完自动下一章</div>
@@ -2183,7 +2788,7 @@
           <h3>关于</h3>
           <div class="row"><div class="rl">关于墨读<small>版本信息 · 开源地址 · 公众号</small></div>
             <button class="btn sm" id="open-about">查看</button></div>
-          <div class="row"><div class="rl">版本<small>${IS_ANDROID ? `墨读 ${esc(S.info.version)} · Android` : (S.info.platform === 'web' ? `墨读 ${esc(S.info.version)} · 网页版` : `墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}`)}</small></div>
+          <div class="row"><div class="rl">版本<small>${IS_ANDROID ? `墨读 ${esc(S.info.version)} · Android` : (S.info.platform === 'web' ? `墨读 ${esc(S.info.version)} · 网页版` : (S.info.platform === 'ios' || S.info.platform === 'harmony') ? `墨读 ${esc(S.info.version)} · ${OS_NAME()}` : `墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}`)}</small></div>
             <span class="rv">${IS_ANDROID ? '数据只存本机' : (S.info.portable ? '便携模式 · 数据在程序目录' : '数据只存本地')}</span></div>
           <div class="row"><div class="rl">数据位置<small>${esc(S.info.paths.root)}</small></div>
             ${IS_ANDROID ? '' : '<button class="link" id="open-dir2">打开</button>'}</div>
@@ -2373,7 +2978,11 @@
         || st.books.find(b => b.name === raw.name && b.author === raw.author)
         || st.books.find(b => b.name === raw.name);
       if (exist) {
-        if (!exist.chapters || !exist.chapters.length) exist.total = raw.total || exist.total;
+        if (!exist.chapters || !exist.chapters.length) {
+          exist.total = raw.total || exist.total;
+          /* 老记录里没有目录页地址时用备份里的补上 —— 这一项决定能不能抓全目录 */
+          if (!exist.tocUrl && raw.tocUrl) exist.tocUrl = raw.tocUrl;
+        }
         exist.updatedAt = Date.now();
         /* 重新导入同一份备份时顺手把以前绑错的书源纠正回来；
            用户手工换过源的书不动，尊重他的选择。 */
@@ -2384,7 +2993,10 @@
         updated++;
         const p = st.progress[exist.id] || {};
         if ((raw.durChapterIndex || 0) >= (p.ci || 0)) {
-          st.progress[exist.id] = { ci: raw.durChapterIndex || 0, title: raw.durChapterTitle || p.title || '', pct: 0, at: raw.durChapterTime || Date.now() };
+          st.progress[exist.id] = {
+            ci: raw.durChapterIndex || 0, title: raw.durChapterTitle || p.title || '',
+            pos: raw.durChapterPos || 0, pct: 0, at: raw.durChapterTime || Date.now()
+          };
         }
         continue;
       }
@@ -2395,11 +3007,24 @@
         /* 记下备份里的原始书源：换源时把它排在最前，源被改名/重建也能找回来 */
         origin: raw.origin || '', originRaw: raw.originRaw || '', originName: raw.originName || '',
         bookUrl: raw.bookUrl, intro: raw.intro || '', cover: raw.cover || '',
+        /* 目录页地址（原版 book.tocUrl）：书地址常常只是详情/下载页，目录得靠它 */
+        tocUrl: raw.tocUrl || '',
         total: raw.total || 0, chapters: [], groupId: raw.groupName ? ensureGroup(raw.groupName) : 'g_default',
+        /* 备份里记的总章数单独存一份：抓回来的目录明显少于它，就说明抓的是「最新章节」 */
+        expectTotal: raw.total || 0,
+        /* 备份里的其余元数据：只做展示/排序，不影响阅读 */
+        latestChapterTitle: raw.latestChapterTitle || '', latestChapterTime: raw.latestChapterTime || 0,
+        lastCheckTime: raw.lastCheckTime || 0, wordCount: raw.wordCount || '',
+        tags: raw.kind || '', bookType: raw.bookType || 0, canUpdate: raw.canUpdate !== false,
+        readConfig: raw.readConfig || null, variable: raw.variable || '',
+        backupOrder: raw.order || 0,
         createdAt: Date.now(), updatedAt: Date.now()
       });
       if (raw.durChapterIndex) {
-        st.progress[id] = { ci: raw.durChapterIndex, title: raw.durChapterTitle || '', pct: 0, at: raw.durChapterTime || Date.now() };
+        st.progress[id] = {
+          ci: raw.durChapterIndex, title: raw.durChapterTitle || '',
+          pos: raw.durChapterPos || 0, pct: 0, at: raw.durChapterTime || Date.now()
+        };
       }
       added++;
     }
@@ -2648,7 +3273,9 @@
     pages: [[]], page: 0, tts: false, ttsIdx: 0, timer: null, saveT: null, chars: 0,
     /* 连续滚动缓冲区（滚动模式）：buf=已接上的章节号，bufTail=最后一章，
        bufLock=正在取下一章，bufFail=取失败的章节与时间；lastWithin=本章内进度 */
-    buf: null, bufTail: -1, bufLock: false, bufFail: {}, lastWithin: null, loadSeq: 0
+    buf: null, bufTail: -1, bufLock: false, bufFail: {}, lastWithin: null, loadSeq: 0,
+    /* 目录面板当前页签：toc=目录，bm=书签（书签按书归属，只在书里看） */
+    tocTab: 'toc'
   };
 
   function applySettings() {
@@ -2708,31 +3335,50 @@
     /* 目录面板只清列表内容，不能整块 innerHTML='' —— #toc-list / #toc-count
        是它的子元素，清掉之后 buildToc() 会拿不到节点 */
     const tocList = $('#toc-list'); if (tocList) tocList.innerHTML = '';
+    const bmList = $('#bm-list'); if (bmList) bmList.innerHTML = '';
+    const bmN = $('#bm-tab-n'); if (bmN) bmN.textContent = '';
     const tocCount = $('#toc-count'); if (tocCount) tocCount.textContent = '';
     $('#r-toc-panel').classList.remove('open');
     $('#toc-mask').classList.remove('on');
   }
 
-  async function openReader(bookId, ci, pct) {
+  async function openReader(bookId, ci, pct, title) {
     const b = getBook(bookId);
     if (!b) return;
     /* 「继续阅读」以前不带 ci，进书永远从第 1 章开始，备份里的进度等于白记。
        没显式指定章节就接上次读到的地方。 */
     const saved = progressOf(b.id) || {};
-    const startCi = ci == null ? (saved.ci || 0) : ci;
+    let startCi = ci == null ? (saved.ci || 0) : ci;
+    /* 书签 / 历史里存的同样是「相对旧目录」的索引：目录一变就指到别的章了，
+       有书名+章节名就按标题找回来。 */
+    const wantTitle = title || (ci == null ? saved.title : '');
+    if (b.chapters && b.chapters.length && wantTitle) {
+      const k = matchChapterIndex(b.chapters, wantTitle, startCi, 0);
+      if (k >= 0) startCi = k;
+    }
     resetReader();                     // 先跟上一本彻底断开
     R.book = b;
     R.chapters = b.chapters || [];
     R.ci = clamp(startCi, 0, Math.max(0, (b.total || 1) - 1));
     R.page = 0;
+    /* 目录面板回到「目录」页签，并把书签页签上的数量按这本书刷一遍 */
+    R.tocTab = 'toc';
+    $$('#toc-tabs button').forEach(el => el.classList.toggle('on', el.dataset.tab === 'toc'));
+    const tl = $('#toc-list'), bl = $('#bm-list');
+    if (tl) tl.hidden = false;
+    if (bl) bl.hidden = true;
+    {
+      const n = S.state.bookmarks.filter(x => x.bookId === b.id).length;
+      const tabN = $('#bm-tab-n');
+      if (tabN) tabN.textContent = n ? ` ${n}` : '';
+    }
     buildToc();                        // 目录同步换成这本，别留着上一本的章节
     $('#reader').classList.add('open');
     /* 手机进书即沉浸：顶/底栏滑出屏幕，点中间唤出（几秒不用自动再藏） */
     if (isAndroidApp()) $('#reader').classList.add('bars-off');
     $('#r-switch').style.display = b.kind === 'local' ? 'none' : '';
     applySettings();
-    $('#r-toc-panel').classList.remove('open');
-    $('#toc-mask').classList.remove('on');
+    closeTocPanel();
     startReadingTimer();
     await loadChapter(R.ci, 0, pct);
   }
@@ -2762,6 +3408,33 @@
       if (document.hidden) return;
       addStats(0, 15);
     }, 15000);
+  }
+
+  /** 打开一本「目录短得反常」的在线书时，后台重抓一次完整目录
+   *  （很多书当初只抓到详情页上的「最新章节」，读起来就是「章节不对」）。
+   *  只在目录明显变大时替换，并按标题把当前章对上，不打断阅读。 */
+  async function fixShortToc(b, src) {
+    try {
+      const curTitle = (b.chapters[R.ci] || {}).title || '';
+      const t = await withTimeout(Engine.getToc(netGet, src, b.bookUrl, {
+        tocUrl: b.tocUrl && b.tocUrl !== b.bookUrl ? b.tocUrl : '',
+        expect: b.total || 0,
+        reverse: !!(b.readConfig && b.readConfig.reverseToc)
+      }), 45000);
+      if (!t.chapters || t.chapters.length <= b.chapters.length) return;
+      const idx = matchChapterIndex(t.chapters, curTitle, R.ci, b.chapters.length);
+      b.chapters = t.chapters;
+      b.total = t.chapters.length;
+      if (t.tocUrl) b.tocUrl = t.tocUrl;
+      if (idx >= 0 && R.book && R.book.id === b.id) {
+        R.ci = idx;
+        R.chapters = b.chapters;
+        buildToc();
+      }
+      upsertBook(b);
+      save(true);
+      toast(`已补全目录：${b.total} 章`);
+    } catch (e) { /* 补不上就算了，不能影响正常阅读 */ }
   }
 
   async function loadChapter(ci, dir, pct) {
@@ -2794,12 +3467,27 @@
       } else {
         const src = srcForBook(b);
         if (!src) throw new Error('这个书源已被删除，可以点右上角「换源」换一个源继续读');
+        /* 老版本把详情页上那十几条「最新章节」当成了全部目录并缓存下来 ——
+           升级后第一次打开这类书时丢掉旧目录重抓一次，不用用户自己去点「更新目录」。 */
+        if (!b.tocFix2 && b.chapters && b.chapters.length && b.chapters.length < 25
+          && (b.origin || b.originRaw || b.tocUrl)) {
+          b.tocFix2 = true;
+          b.chapters = [];
+        }
         if (!b.chapters || !b.chapters.length) {
           loading.textContent = '获取目录…';
+          const expectTotal = b.expectTotal || b.total || 0;
           /* 30s 双保险：底层网络有自己的超时，但失效书源常走多级重定向/慢站，
              不兜一层的话「加载中…」能挂到天荒地老，看起来就像卡死 */
-          const toc = await withTimeout(Engine.getToc(mo.net, src, b.bookUrl), 30000);
+          const toc = await withTimeout(Engine.getToc(netGet, src, b.bookUrl, {
+            /* 备份里的目录页（原版 book.tocUrl）：书地址常常只是详情/下载页 */
+            tocUrl: b.tocUrl && b.tocUrl !== b.bookUrl ? b.tocUrl : '',
+            /* 备份里的总章数：抓回来明显偏少就说明抓的是「最新章节」，继续找 */
+            expect: expectTotal,
+            reverse: !!(b.readConfig && b.readConfig.reverseToc)
+          }), 45000);
           b.chapters = toc.chapters; b.total = toc.chapters.length;
+          if (toc.tocUrl) b.tocUrl = toc.tocUrl;
           if (toc.info.name) b.name = toc.info.name;
           if (toc.info.author) b.author = toc.info.author;
           if (toc.info.coverUrl) b.cover = toc.info.coverUrl;
@@ -2807,16 +3495,35 @@
           R.chapters = b.chapters;
           buildToc();
           if (!b.chapters.length) throw new Error('目录为空，检查书源的目录规则');
-          /* 备份里的阅读进度按原书源的章节数记，换源或站点改版后新目录可能短很多，
-             直接沿用旧 ci 就是「章节不存在」→ 一进书就是错误页。
-             先按备份记的章节标题定位，找不到就落到最后一章。 */
-          if (R.ci >= b.chapters.length) {
-            const p = progressOf(b.id) || {};
-            const want = normChapTitle(p.title || b.durChapterTitle || '');
-            let k = want ? b.chapters.findIndex(c => normChapTitle(c.title) === want) : -1;
-            if (k < 0) k = b.chapters.length - 1;
-            R.ci = clamp(k, 0, b.chapters.length - 1);
+          /* 阅读进度是按「原版那本书」的目录记的。站点改版、换源、或者目录从
+             「最新章节 12 条」变成完整目录之后，同一个索引指向的章节完全不同
+             （第59章 变成 第660章 就是这么来的）。所以只要标题对得上，就以标题为准。 */
+          const p = progressOf(b.id) || {};
+          const want = p.title || b.durChapterTitle || '';
+          const k = matchChapterIndex(b.chapters, want, R.ci, expectTotal || p.total || 0);
+          if (k >= 0) R.ci = k;
+          else if (R.ci >= b.chapters.length) {
+            /* 标题也对不上（站点把章节名改了）：按比例落位，至少不会从最后一章开始 */
+            const ratio = expectTotal ? R.ci / expectTotal : 0;
+            R.ci = ratio > 0 && ratio < 1 ? Math.round(ratio * (b.chapters.length - 1)) : b.chapters.length - 1;
           }
+          R.ci = clamp(R.ci, 0, b.chapters.length - 1);
+          /* 上面可能把 R.ci 按标题挪了位置，目录高亮得跟着走一次，
+             否则目录里高亮的是「第60章」而正文是「第59章」 */
+          const on = document.querySelector(`#toc-list .toc-item[data-ci="${R.ci}"]`);
+          $$('#toc-list .toc-item.on').forEach(el => el.classList.remove('on'));
+          if (on) on.classList.add('on');
+          /* 站点自己只给了几十章（备份里却记着上千章）时说明它把完整目录藏了/删了，
+             读者在这里多半会以为「又抓错了」，直接告诉他可以换源 */
+          if (expectTotal && b.chapters.length < expectTotal * 0.6 && !b.tocShortWarned) {
+            b.tocShortWarned = true;
+            toast(`这个源只给了 ${b.chapters.length} 章（原书 ${expectTotal} 章），可以点「换源」换一个更全的源`, 7000);
+          }
+        }
+        /* 目录只有十来章的在线书，多半当初只抓到「最新章节」：后台补一次完整目录 */
+        if (!b.tocFixed && b.total > 0 && b.total < 15) {
+          b.tocFixed = true;
+          fixShortToc(b, src);
         }
         const ch = b.chapters[R.ci];
         if (!ch) throw new Error('章节不存在');
@@ -2826,9 +3533,19 @@
           paras = cached.text;
         } else {
           loading.textContent = '加载正文…';
-          const r = await withTimeout(Engine.getContent(mo.net, src, ch.url), 20000);
+          const r = await withTimeout(Engine.getContent(netGet, src, ch.url), 20000);
           paras = r.paras;
+          if (r.blocked) throw new Error('这个站要求人机验证（或本章是 VIP 章节），过一会儿再试，或换个源');
+          /* 站点把正文换成了加密 JSON 接口，书源规则又没解开 —— 别再显示一屏密文 */
+          if (r.fail === 'json') throw new Error('这个源的正文是加密接口（返回 JSON 密文），本机解不开。换一个源试试');
           if (!paras.length) throw new Error('正文为空，检查正文规则');
+          /* 漫画章：先把图下回来再缓存，否则每次翻页都要重新下载，
+             而且缓存里留下远程地址的话离线就全是白框 */
+          if (paras.some(isRemoteImg)) {
+            loading.textContent = '下载图片…';
+            paras = await resolveImgs(paras, src);
+            if (!paras.length) throw new Error('这一章的图片都下载失败了，可能是站点防盗链');
+          }
           /* 缓存写入不必挡着渲染：IndexedDB 快但也是异步的，先出字再落盘 */
           Promise.resolve(mo.cache.set(b.id, R.ci, { title, text: paras })).catch(() => { });
         }
@@ -2850,6 +3567,8 @@
       R.title = title;
       R.paras = paras;
       R.chars = paras.reduce((n, p) => n + (isImgPara(p) ? 0 : p.length), 0);
+      /* 图片为主、文字很少 → 当漫画排版：单图占满整屏 */
+      R.comic = paras.some(isImgPara) && R.chars < 300;
       addStats(R.chars, 0);
       renderChapter(dir);
       if (pct) {
@@ -2874,7 +3593,7 @@
       const canSwitch = b.kind !== 'local';
       const fromBackup = !!(b.origin || b.originRaw);
       $('#r-page').innerHTML = `<div class="err">加载失败：${esc(msg)}<br>
-        <span style="font-size:12px;opacity:.7">${!canSwitch ? '检查「书源」里的规则，或重新导入这本书'
+        <span style="font-size:12px;opacity:.7">${!canSwitch ? '检查「扩展 → 书源」里的规则，或重新导入这本书'
           : fromBackup ? '这本书来自备份：备份只存书源地址和目录页，原站点可能已换域名或失效。先点「重试」，不行就「换源继续读」，备份原源会排在最前'
             : '这个书源可能已失效，先点「重试」再抓一次；还不行就换一个源继续读'}</span>
         <div class="err-act">
@@ -2897,7 +3616,7 @@
       if (hit) return;
       const ch = b.chapters[idx];
       if (!ch) return;
-      const r = await Engine.getContent(mo.net, src, ch.url);
+      const r = await Engine.getContent(netGet, src, ch.url);
       if (r.paras.length) await mo.cache.set(b.id, idx, { title: ch.title, text: r.paras });
     } catch (e) { /* 预取失败无所谓 */ }
   }
@@ -2917,11 +3636,13 @@
     if (cached && cached.text && cached.text.length) return { title: ch.title, paras: cached.text };
     const src = srcForBook(b);
     if (!src) throw new Error('书源已被删除，无法继续加载');
-    const r = await withTimeout(Engine.getContent(mo.net, src, ch.url), 30000);
+    const r = await withTimeout(Engine.getContent(netGet, src, ch.url), 30000);
     if (!r.paras.length) throw new Error('正文为空，检查正文规则');
-    await mo.cache.set(b.id, idx, { title: ch.title, text: r.paras });
+    const paras = r.paras.some(isRemoteImg) ? await resolveImgs(r.paras, src) : r.paras;
+    if (!paras.length) throw new Error('这一章的图片都下载失败了');
+    await mo.cache.set(b.id, idx, { title: ch.title, text: paras });
     if (S.state.settings.autoCacheNext && idx + 1 < (b.chapters || []).length) prefetch(b, src, idx + 1);
-    return { title: ch.title, paras: r.paras };
+    return { title: ch.title, paras };
   }
 
   /** 滚动模式：视口逼近缓冲区底部时，把下一章接到后面。不动当前滚动位置，
@@ -3361,6 +4082,71 @@
     }
   }
 
+  /* ---------------- 目录 / 书签面板 ----------------
+   * 书签原来占一个侧栏入口，翻到别的书也能看到一堆混在一起的书签。
+   * 现在它跟目录共用这个面板、按书归档：在书里点「书签」页签看的就是这本的。 */
+  function closeTocPanel() {
+    const p = $('#r-toc-panel');
+    if (p) p.classList.remove('open');
+    const m = $('#toc-mask');
+    if (m) m.classList.remove('on');
+  }
+
+  function setTocTab(tab) {
+    R.tocTab = tab === 'bm' ? 'bm' : 'toc';
+    const isBm = R.tocTab === 'bm';
+    $$('#toc-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === R.tocTab));
+    const tl = $('#toc-list'), bl = $('#bm-list');
+    if (tl) tl.hidden = isBm;
+    if (bl) bl.hidden = !isBm;
+    if (isBm) buildBookmarks(); else buildToc();
+  }
+
+  function bookmarksOfBook() {
+    const b = R.book;
+    if (!b) return [];
+    return S.state.bookmarks
+      .filter(x => x.bookId === b.id)
+      .sort((a, c) => (a.ci - c.ci) || (a.at - c.at));
+  }
+
+  function buildBookmarks() {
+    const box = $('#bm-list');
+    if (!box) return;
+    const bms = bookmarksOfBook();
+    const tabN = $('#bm-tab-n');
+    if (tabN) tabN.textContent = bms.length ? ` ${bms.length}` : '';
+    const cnt = $('#toc-count');
+    if (cnt) cnt.textContent = bms.length ? `${bms.length} 个` : '';
+    if (!bms.length) {
+      box.innerHTML = `<div class="bm-empty">这本书还没有书签。<br>
+        读到想记住的地方，点顶栏的<b>书签</b>图标（快捷键 B）。<br>
+        书签会记下章节和当时的位置，只属于这本书。</div>`;
+      return;
+    }
+    box.innerHTML = bms.map(x => `<div class="bm-item" data-bm="${x.id}">
+        <div class="bm-t">${esc(x.title || '第 ' + (x.ci + 1) + ' 章')}</div>
+        <div class="bm-s">${esc(x.text || '（这一页没有摘到文字）')}</div>
+        <div class="bm-m"><span>${fmtWhen(x.at)}${x.pct ? ` · 全章 ${Math.round(x.pct * 100)}%` : ''}</span>
+          <button class="bm-del" data-bmdel="${x.id}">删除</button></div>
+      </div>`).join('');
+    $$('#bm-list [data-bm]').forEach(el => el.onclick = e => {
+      if (e.target.closest('[data-bmdel]')) return;
+      const bm = S.state.bookmarks.find(y => y.id === el.dataset.bm);
+      if (!bm) return;
+      R.page = 0;
+      loadChapter(bm.ci, bm.pct);
+      closeTocPanel();
+    });
+    $$('#bm-list [data-bmdel]').forEach(b => b.onclick = e => {
+      e.stopPropagation();
+      S.state.bookmarks = S.state.bookmarks.filter(y => y.id !== b.dataset.bmdel);
+      save(true);
+      buildBookmarks();
+      toast('已删除书签');
+    });
+  }
+
   function buildToc() {
     const b = R.book;
     const list = b.chapters || [];
@@ -3373,8 +4159,7 @@
     $$('#toc-list .toc-item').forEach(el => el.onclick = () => {
       R.page = 0;
       loadChapter(+el.dataset.ci, 0);
-      $('#r-toc-panel').classList.remove('open');
-      $('#toc-mask').classList.remove('on');
+      closeTocPanel();
     });
     updateTocActive();
   }
@@ -3383,6 +4168,7 @@
        （老实现还会对当前项 scrollIntoView，等于每翻一页逼一次排版），
        目录打开时 buildToc 会重新标一次，所以这里直接返回。 */
     if (!$('#r-toc-panel').classList.contains('open')) return;
+    if (R.tocTab === 'bm') return;        // 书签页签下没有「当前章高亮」这回事
     if (R.tocOn && R.tocOn.isConnected) R.tocOn.classList.remove('on');
     const on = document.querySelector(`#toc-list .toc-item[data-ci="${R.ci}"]`);
     if (!on) { R.tocOn = null; return; }
@@ -3413,13 +4199,21 @@
       pct = max > 10 ? stage.scrollTop / max : 0;
       text = (R.paras.find(p => !isImgPara(p)) || '').slice(0, 60);
     }
-    const exist = S.state.bookmarks.find(x => x.bookId === b.id && x.ci === R.ci);
-    if (exist) { toast('这一章已经加过书签了'); return; }
+    /* 同一章可以加多个书签（长章节里两处都想记），只挡「几乎同一个位置」
+       的重复点击，避免手抖连按出好几条一模一样的 */
+    const exist = S.state.bookmarks.find(x => x.bookId === b.id && x.ci === R.ci && Math.abs((x.pct || 0) - pct) < 0.015);
+    if (exist) { toast('这个位置已经有书签了'); return; }
     S.state.bookmarks.unshift({
       id: uid('B'), bookId: b.id, name: b.name, ci: R.ci, title: R.title, pct, text, at: Date.now()
     });
     save(true);
-    toast('已添加书签');
+    toast('已添加书签 · 在目录面板的「书签」里看');
+    if (R.tocTab === 'bm' && $('#r-toc-panel').classList.contains('open')) buildBookmarks();
+    else {
+      const n = bookmarksOfBook().length;
+      const tabN = $('#bm-tab-n');
+      if (tabN) tabN.textContent = n ? ` ${n}` : '';
+    }
     $('#r-bookmark').classList.add('on');
     setTimeout(() => $('#r-bookmark').classList.remove('on'), 800);
   }
@@ -3544,8 +4338,7 @@
      三端共用这一个弹窗，图片走相对路径（ui/ 与 dist-web 里各放一份）。 */
   const GITHUB_URL = 'https://github.com/RoutineMiku/MoRead-Windows';
   function aboutPanel() {
-    const plat = S.info.platform === 'android' ? 'Android'
-      : (S.info.platform === 'web' ? '网页版' : (S.info.platform === 'darwin' ? 'macOS' : 'Windows'));
+    const plat = OS_NAME();
     openModal(`<div class="about">
       <img class="about-logo" src="logo.png" alt="墨读" />
       <div class="about-name">墨读</div>
@@ -3713,21 +4506,78 @@
       .replace(/[\s·、,，.。:：\-—_()（）\[\]【】]/g, '').toLowerCase();
   }
 
+  /**
+   * 在（可能已经变了的）目录里按标题找回「上次读的那一章」。
+   * 章节索引只在同一份目录里才有意义：备份记的是原书源目录的索引，
+   * 站点补全目录、换源、或者目录从「最新章节 12 条」变成 716 章之后，
+   * 同一个 ci 指向的就是完全不同的章（显示第59章、点进去第660章）。
+   */
+  function matchChapterIndex(chapters, want, hint, oldTotal) {
+    if (!chapters || !chapters.length) return -1;
+    if (!String(want || '').trim()) return -1;
+    const nw = normChapTitle(want);
+    const hits = [];
+    chapters.forEach((c, i) => {
+      if (nw && normChapTitle(c.title) === nw) hits.push(i);
+    });
+    if (!hits.length && nw) {
+      /* 站点在标题里加了前后缀（「第59章 xxx（1/2）」）：退一步用包含关系 */
+      chapters.forEach((c, i) => {
+        const t2 = normChapTitle(c.title);
+        if (!t2 || hits.indexOf(i) >= 0) return;
+        if (t2.indexOf(nw) === 0 || nw.indexOf(t2) === 0) hits.push(i);
+      });
+    }
+    if (!hits.length) {
+      /* 标题被彻底改过：用章节号兜底（第59章 ↔ 第059章） */
+      const no = Engine.chapNo(want);
+      if (isFinite(no)) chapters.forEach((c, i) => { if (Engine.chapNo(c.title) === no) hits.push(i); });
+    }
+    if (!hits.length) return -1;
+    if (hits.length === 1) return hits[0];
+    /* 同名章节（「第1章」在好几个卷里都出现）：挑离原位置最近的那个 */
+    const guess = oldTotal && oldTotal !== chapters.length ? (hint || 0) * (chapters.length / oldTotal) : (hint || 0);
+    return hits.reduce((best, i) => (Math.abs(i - guess) < Math.abs(best - guess) ? i : best), hits[0]);
+  }
+
   /* 换源时同一个关键词会在多个源上反复搜：10 分钟内直接复用结果，
      第二次打开换源基本是立刻出列表，不用再等一轮网络。 */
   const SEARCH_MEMO = new Map();
   const MEMO_TTL = 10 * 60e3;
+  /* 目录也缓存：换回上次用过的源时不用再抓一遍（588 章那本书一次要 700ms+） */
+  const TOC_MEMO = new Map();
+  function memoTocGet(src, bookUrl) {
+    const m = TOC_MEMO.get(src.id + '|' + bookUrl);
+    return m && Date.now() - m.at < MEMO_TTL ? m.toc : null;
+  }
+  function memoTocPut(src, bookUrl, toc) {
+    if (TOC_MEMO.size > 60) TOC_MEMO.clear();
+    TOC_MEMO.set(src.id + '|' + bookUrl, { at: Date.now(), toc });
+  }
+  async function fetchToc(src, bookUrl) {
+    const hit = memoTocGet(src, bookUrl);
+    if (hit) return hit;
+    const toc = await withTimeout(Engine.getToc(netGet, src, bookUrl), 30000);
+    if (toc && toc.chapters && toc.chapters.length) memoTocPut(src, bookUrl, toc);
+    return toc;
+  }
   function memoSearch(src, kw) {
     const k = src.id + '|' + kw;
     const m = SEARCH_MEMO.get(k);
     if (m && Date.now() - m.at < MEMO_TTL) return Promise.resolve(m.hits);
     /* 请求本身也要带超时：JS 这边 7 秒就放弃等它了，但底层连接不会跟着取消，
        安卓上会一直占着桥线程到默认的 18 秒 —— 并发一高就全在排队。 */
-    const net = u => mo.net(Object.assign({ timeout: 8000 }, u));
+    const net = u => netGet(Object.assign({ timeout: 8000 }, u));
     const p = Engine.search(net, src, kw).then(hits => {
       if (SEARCH_MEMO.size > 400) SEARCH_MEMO.clear();
       SEARCH_MEMO.set(k, { at: Date.now(), hits });
       return hits;
+    }, err => {
+      /* 失败也记一笔：两千多个源里死源占大多数，不缓存的话每次打开换源面板
+         都要陪它们把超时再等一遍 */
+      if (SEARCH_MEMO.size > 400) SEARCH_MEMO.clear();
+      SEARCH_MEMO.set(k, { at: Date.now(), hits: [], dead: true });
+      throw err;
     });
     /* withTimeout 会先放手，底层请求失败时别冒成未处理的 rejection */
     p.catch(() => {});
@@ -3738,7 +4588,7 @@
     const b = R.book || (S.state.books.find(x => x.id === S.switchBookId));
     if (!b) return;
     const enabled = S.state.sources.filter(s => s.enabled && s.searchUrl);
-    if (!enabled.length) { toast('没有启用的网络书源，先去「书源」里启用'); return; }
+    if (!enabled.length) { toast('没有启用的网络书源，先去「扩展 → 书源」里启用'); return; }
     /* 从原版备份恢复后动辄两千多个源，只搜 24 个等于把备份里排在后面的源全丢掉，
        「以前能看的那个源」往往就找不到。书源多时自动把上限提上来。 */
     let cap = clamp(S.state.settings.switchLimit || 24, 4, 120);
@@ -3761,9 +4611,9 @@
     const srcs = pool.slice().sort(cmp).slice(0, cap);
     const srcRank = new Map(srcs.map((s, i) => [s.id, i]));
     const skipped = enabled.length - srcs.length;
-    const conc = isAndroidApp() ? 5 : 8;
+    const conc = isAndroidApp() ? 6 : 10;
     const kw = (typeof kwOverride === 'string' && kwOverride.trim())
-      ? kwOverride.trim() : String(b.name || '').trim();
+      ? kwOverride.trim() : cleanSearchKw(b.name);
 
     openModal(`<h3>换源 · ${esc(b.name)}</h3>
       <p class="desc">在 ${srcs.length} 个书源里找同名书（共启用 ${enabled.length} 个，优先备份原源与书架在用的源${skipped > 0 ? `，本次不搜 ${skipped} 个` : ''}）。<br>当前读到：${esc(R.title || '未开始')}（第 ${(R.ci || 0) + 1} 章）</p>
@@ -3773,7 +4623,21 @@
       </div>
       <div class="sw-prog"><span id="sw-prog-t">准备搜索…</span><button class="link" id="sw-stop">停止</button></div>
       <div class="sw-list searching" id="sw-list"><div class="hint" id="sw-hint">搜索中…</div></div>
-      <div class="modal-actions"><button class="btn" onclick="window.__closeModal()">关闭</button></div>`, true);
+      <div class="modal-actions">
+        <button class="btn left" id="sw-web">去网页搜书</button>
+        <button class="btn" onclick="window.__closeModal()">关闭</button>
+      </div>`, true);
+    const swWeb = $('#sw-web');
+    if (swWeb) swWeb.onclick = () => {
+      closeModal();
+      setSearchMode('web');
+      setView('search');
+      setTimeout(() => {
+        const i = $('#search-input');
+        if (i) i.value = kw;
+        runSearch(kw);
+      }, 60);
+    };
 
     const box = $('#sw-list');
     const hits = [];
@@ -3844,35 +4708,65 @@
       if (r) applySwitch(r, btn);
     });
 
-    const worker = async () => {
+    /* 高级源（带 jsLib 的书源）执行规则时走同步请求，一发起就把主线程钉住几百毫秒到 1.5 秒。
+       以前它们和普通源一起被 8 个并发拉着跑，换源面板就一直在卡。
+       现在拆成两条队列：普通源照旧并发，高级源一次只跑一个，跑前先把控制权还给界面。 */
+    const isAdv = s => !!s.jsLib;
+    const plainSrcs = srcs.filter(s => !isAdv(s));
+    const advSrcs = srcs.filter(isAdv);
+    const stillOpen = () => !stopped && document.body.contains(box) && $('#modal').classList.contains('open');
+    const tryOne = async s => {
+      try {
+        const r = await withTimeout(memoSearch(s, kw), isAdv(s) ? 6000 : 4500);
+        const fresh = [];
+        for (const x of r) {
+          /* 整页兜底解析出来的「结果」多数不是书，换源列表里只会添乱 */
+          if (x.loose) continue;
+          const a = normChapTitle(x.name), t = normChapTitle(kw);
+          if (!(a === t || a.includes(t) || t.includes(a))) continue;
+          const key = x.sourceId + '|' + x.bookUrl;
+          if (keys.has(key)) continue;
+          keys.add(key);
+          hits.push(x);
+          fresh.push(x);
+        }
+        if (fresh.length) appendHits(fresh);
+      } catch (e) { /* 单个源失败不影响其他 */ }
+      done++;
+      progress();
+    };
+    const plainWorker = async () => {
       while (true) {
-        if (stopped || hits.length >= 20) return;
-        /* 弹窗关掉（或已经切到别的源）就别再搜了：安卓上继续跑只会拖慢后面的章节加载 */
-        if (!document.body.contains(box) || !$('#modal').classList.contains('open')) return;
+        if (stopped || hits.length >= 12) return;
+        if (!stillOpen()) return;
         const i = cursor++;
-        if (i >= srcs.length) return;
-        const s = srcs[i];
-        try {
-          const r = await withTimeout(memoSearch(s, kw), 7000);
-          const fresh = [];
-          for (const x of r) {
-            /* 整页兜底解析出来的「结果」多数不是书，换源列表里只会添乱 */
-            if (x.loose) continue;
-            const a = normChapTitle(x.name), t = normChapTitle(kw);
-            if (!(a === t || a.includes(t) || t.includes(a))) continue;
-            const key = x.sourceId + '|' + x.bookUrl;
-            if (keys.has(key)) continue;
-            keys.add(key);
-            hits.push(x);
-            fresh.push(x);
-          }
-          if (fresh.length) appendHits(fresh);
-        } catch (e) { /* 单个源失败不影响其他 */ }
-        done++;
-        progress();
+        if (i >= plainSrcs.length) return;
+        await new Promise(r => setTimeout(r, 0));      // 让界面先画一帧
+        await tryOne(plainSrcs[i]);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(conc, srcs.length) }, worker));
+    /* 高级源默认不搜：它们跑一次要把界面钉住 0.5~1.6 秒，
+       换源面板的主要体验应该是「立刻有列表」。想试的用户点一下就跑。 */
+    let advRunning = false;
+    const runAdv = async () => {
+      if (advRunning) return;
+      advRunning = true;
+      for (const s of advSrcs) {
+        if (stopped) return;
+        if (!stillOpen()) return;
+        const el = $('#sw-prog-t');
+        if (el) el.textContent = `正在试高级源 ${advSrcs.indexOf(s) + 1}/${advSrcs.length}：${s.name}（脚本源，界面会卡一下）`;
+        await new Promise(r => setTimeout(r, 30));
+        const before = hits.length;
+        await tryOne(s);
+        if (hits.length > before) {
+          box.classList.remove('searching');
+          box.insertAdjacentHTML('beforeend', hits.slice(before).map(rowHtml).join(''));
+          box.scrollTop = box.scrollHeight;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(conc, plainSrcs.length)) }, plainWorker));
     finished = true;
     sortHits();
     if (document.body.contains(box)) {
@@ -3883,7 +4777,27 @@
       const st = $('#sw-stop');
       if (st) st.remove();
       progress();
+      if (advSrcs.length) {
+        const bar = document.createElement('div');
+        bar.className = 'sw-adv';
+        bar.innerHTML = `<span>还有 ${advSrcs.length} 个「脚本书源」没试（规则是 JS，跑起来会卡一下界面）</span>
+          <button class="btn sm" id="sw-adv">试一下</button>`;
+        box.parentNode.insertBefore(bar, box.nextSibling);
+        const b2 = bar.querySelector('#sw-adv');
+        if (b2) b2.onclick = () => { b2.disabled = true; b2.textContent = '试运行中…'; runAdv(); };
+      }
     }
+  }
+
+  /* 阅读器顶部那行小字：换源/更新目录这种「要等一会儿」的动作拿它当进度条，
+     比弹窗好——不挡正文，也不会有第二个窗口跳出来打断阅读。 */
+  function showReaderBusy(msg) {
+    const el = $('#r-loading');
+    if (el) el.textContent = msg || '加载中…';
+  }
+  function hideReaderBusy() {
+    const el = $('#r-loading');
+    if (el) el.textContent = '';
   }
 
   async function applySwitch(r, btn) {
@@ -3896,24 +4810,34 @@
     const label = btn ? btn.textContent : '';
     const busy = on => { if (!btn) return; btn.disabled = on; btn.textContent = on ? '切换中…' : label; };
     busy(true);
-    toast('正在获取新源目录…');
+    /* 先把面板收掉：目录要抓 0.7~2 秒，让用户盯着一个不动的弹窗就是「卡」
+       （目录有缓存时下面几乎是瞬间完成的） */
+    const cached = memoTocGet(src, r.bookUrl);
+    closeModal();
+    showReaderBusy(`正在切到「${src.name}」…`);
     let toc;
     try {
-      toc = await withTimeout(Engine.getToc(mo.net, src, r.bookUrl), 30000);
+      toc = await fetchToc(src, r.bookUrl);
     } catch (e) {
       busy(false);
+      hideReaderBusy();
       return toast('换源失败：' + (e.message || e));
     }
-    if (!toc.chapters.length) { busy(false); return toast('这个源没有目录，换一个试试'); }
+    if (!toc.chapters.length) { busy(false); hideReaderBusy(); return toast('这个源没有目录，换一个试试'); }
+    if (cached) hideReaderBusy();
 
     const curTitle = R.title || '';
     const curNorm = normChapTitle(curTitle);
-    let idx = toc.chapters.findIndex(c => normChapTitle(c.title) === curNorm);
-    if (idx < 0) idx = toc.chapters.findIndex(c => normChapTitle(c.title).includes(curNorm) && curNorm.length > 1);
+    /* 换源后目录顺序/章数都可能变，索引不可信，一律按标题找回当前章 */
+    let idx = matchChapterIndex(toc.chapters, curTitle, R.ci, b.chapters ? b.chapters.length : 0);
+    if (idx < 0 && curNorm) idx = toc.chapters.findIndex(c => normChapTitle(c.title).includes(curNorm) && curNorm.length > 1);
     if (idx < 0) idx = clamp(R.ci, 0, toc.chapters.length - 1);
 
     /* 标记为用户手工选的源：以后再导入备份时不要把他选的覆盖回备份里的旧源 */
     b.manualSource = true;
+    b.kind = 'online';       // 从网页书/漫画换回书源时，类型也要跟着变
+    b.tocFixed = true;       // 换源就是人工确认过目录，别再后台自动补
+    if (toc.tocUrl) b.tocUrl = toc.tocUrl;
     b.sourceId = r.sourceId;
     b.sourceName = src.name;
     b.bookUrl = r.bookUrl;
@@ -3924,12 +4848,12 @@
     if (toc.info.intro && !b.intro) b.intro = toc.info.intro;
     await mo.cache.clear(b.id);
     save(true);
-    closeModal();
     renderShelf();          // 书架卡片上的来源名 / 进度跟着换，不然回到书架像没换成
     R.chapters = b.chapters;
     R.ci = idx;
     buildToc();
     if (R.book) await loadChapter(idx, 0);
+    hideReaderBusy();
     toast(`已换到「${src.name}」，定位到 ${toc.chapters[idx].title.slice(0, 20)}`);
   }
 
@@ -3973,12 +4897,10 @@
     $('#r-toc').onclick = () => {
       const open = $('#r-toc-panel').classList.toggle('open');
       $('#toc-mask').classList.toggle('on', open);
-      if (open) buildToc();
+      if (open) setTocTab(R.tocTab || 'toc');
     };
-    $('#toc-mask').onclick = () => {
-      $('#r-toc-panel').classList.remove('open');
-      $('#toc-mask').classList.remove('on');
-    };
+    $$('#toc-tabs button').forEach(b => b.onclick = () => setTocTab(b.dataset.tab));
+    $('#toc-mask').onclick = closeTocPanel;
     $$('#r-swatches .sw').forEach(el => el.onclick = () => setTheme(el.dataset.t));
     $('#r-bookmark').onclick = addBookmark;
     $('#r-tts').onclick = () => { if (R.tts) stopTTS(); else startTTS(0); };
@@ -4160,14 +5082,12 @@
         closeReader();
         return true;
       }
-      if (S.view === 'web' && isAndroidApp()) {
-        /* 有浏览历史就退一步，没有历史但在看某个页面就先回到搜书首页 */
-        if (WA.stack.length || WA.lastUrl) {
-          const wb = $('#wa-back');
-          if (wb) { wb.click(); return true; }
-        }
-        setView('shelf');
-        return true;
+      /* 扩展里的子页（书源 / 历史 / 统计）先退回扩展菜单，再退到书架 */
+      if (S.view === 'ext' && S.ext) { S.ext = null; renderExt(); const t = $('#tb-title'); if (t) t.textContent = '扩展'; return true; }
+      /* 网页搜书里点进某个站之后，返回应当退回搜索结果那一页 */
+      if (S.view === 'search' && S.searchMode === 'web' && WA.stack.length) {
+        const wb = $('#wa-back');
+        if (wb && !wb.disabled) { wb.click(); return true; }
       }
       if (S.view !== 'shelf') { setView('shelf'); return true; }
       return false;
@@ -4215,6 +5135,10 @@
       setView, renderShelf, get state() { return S.state; },
       get reader() { return R; },
       openReader, loadChapter, runSearch, ttsVoices, ttsOrderedVoices, pickSearchSources,
+      previewOnlineBook, readPreview, resolveImgs, paintOnline,   // 预览 / 漫画取图：自动化验证用
+      previewWebBook, waFetch, upgradeWa,                          // 网页书预览 / 抓取：自动化验证用
+      renderWaResult,                                              // 网页搜书结果渲染：自动化验证用
+      showSourcePicker, groupResults,   // 搜索结果合并 / 换源面板：自动化验证用
       doImport   // 自动化导入用：绕过 pickBooks（contextBridge 对象不可改写）
     };
   }
