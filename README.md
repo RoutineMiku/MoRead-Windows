@@ -7,19 +7,19 @@
 > 存档格式与原版「阅读」双向兼容，可以直接导入原版「阅读」导出的 zip 备份。
 > 同一套 `ui/` 跑在七个地方：Windows / Linux / macOS / Android / 浏览器 / 鸿蒙 / iOS。
 
-**下载**（最新是 [Releases · v0.6.10](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.10)；Windows x64 / Android 7+ / Linux x64 / Linux arm64 / macOS Intel / macOS Apple Silicon / 鸿蒙 NEXT (5.0) / iOS 15+ 仍是旧版本（本期没有重出），链接指向旧标签，能用但功能落后）：
+**下载**（全平台产物都在 [Releases · v0.6.10](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.10)，各平台同一套 `ui/`）：
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| Windows x64 | [`MoRead-windows-0.6.9.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.9/MoRead-windows-0.6.9.zip) | 解压后双击 `墨读.exe`，免安装、不写注册表，数据跟着程序走 |
-| Android 7+ | [`MoRead-android-0.6.9.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.9/MoRead-android-0.6.9.apk) | 直接安装，WebView 内置 Node 兼容层（versionCode 609） |
-| Linux x64 | [`MoRead-linux-x64-0.6.9.tar.gz`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.9/MoRead-linux-x64-0.6.9.tar.gz) | 解压 → `./moread` 运行；`./install.sh` 装进应用菜单 |
-| Linux arm64 | [`MoRead-linux-arm64-0.6.9.tar.gz`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.9/MoRead-linux-arm64-0.6.9.tar.gz) | 同上，树莓派 / ARM 小主机 |
-| macOS Intel | [`MoRead-mac-x64-0.6.9.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.9/MoRead-mac-x64-0.6.9.zip) | 未签名：首次右键 → 打开，或 `xattr -dr com.apple.quarantine MoRead.app` |
-| macOS Apple Silicon | [`MoRead-mac-arm64-0.6.9.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.9/MoRead-mac-arm64-0.6.9.zip) | 同上 |
+| Windows x64 | [`MoRead-windows-0.6.10.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-windows-0.6.10.zip) | 解压后双击 `墨读.exe`，免安装、不写注册表，数据跟着程序走 |
+| Android 7+ | [`MoRead-android-0.6.10.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-android-0.6.10.apk) | 直接安装，WebView 内置 Node 兼容层（versionCode 610） |
+| Linux x64 | [`MoRead-linux-x64-0.6.10.tar.gz`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-linux-x64-0.6.10.tar.gz) | 解压 → `./moread` 运行；`./install.sh` 装进应用菜单 |
+| Linux arm64 | [`MoRead-linux-arm64-0.6.10.tar.gz`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-linux-arm64-0.6.10.tar.gz) | 同上，树莓派 / ARM 小主机 |
+| macOS Intel | [`MoRead-mac-x64-0.6.10.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-mac-x64-0.6.10.zip) | 未签名：首次右键 → 打开，或 `xattr -dr com.apple.quarantine MoRead.app` |
+| macOS Apple Silicon | [`MoRead-mac-arm64-0.6.10.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-mac-arm64-0.6.10.zip) | 同上 |
 | 鸿蒙 4.x 及以下 | 同上 APK | 系统自带安卓兼容，直接装 |
-| 鸿蒙 NEXT (5.0) | [`MoRead-harmony-0.6.9.hap`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.9/MoRead-harmony-0.6.9.hap) · [自签版](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.9/MoRead-harmony-0.6.9-signed.hap) | ArkWeb 壳；未签名包用 DevEco 自动签名或自己的证书，自签版可直接 `hdc install`，见 `harmony/README.md` |
-| iOS 15+ | [`MoRead-0.6.9-unsigned.ipa`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.9/MoRead-0.6.9-unsigned.ipa) | 未签名 ipa（GitHub Actions 的 macOS runner 编的），Sideloadly 填自己 Apple ID 装，见 `ios/README.md` |
+| 鸿蒙 NEXT (5.0) | [`MoRead-harmony-0.6.10.hap`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-harmony-0.6.10.hap) · [自签版](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-harmony-0.6.10-signed.hap) | ArkWeb 壳；未签名包用 DevEco 自动签名或自己的证书，自签版可直接 `hdc install`，见 `harmony/README.md` |
+| iOS 15+ | [`MoRead-0.6.10-unsigned.ipa`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-0.6.10-unsigned.ipa) | 未签名 ipa（GitHub Actions 的 macOS runner 编的），Sideloadly 填自己 Apple ID 装，见 `ios/README.md` |
 | 网页版 / iPad PWA | **<https://routinemiku.github.io/MoRead-Windows/>** | 免安装免账号，Safari「添加到主屏幕」即得全屏图标 |
 
 各平台怎么打、有哪些已知限制：**[docs/platforms.md](docs/platforms.md)**
