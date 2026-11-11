@@ -15,7 +15,7 @@ const src = path.join(root, 'ui');
 const dst = path.join(root, 'android', 'app', 'src', 'main', 'assets', 'ui');
 
 fs.mkdirSync(dst, { recursive: true });
-for (const f of ['app.js', 'style.css', 'detect.js', 'engine.js', 'index.html', 'gzh-qr.jpg', 'logo.png']) {
+for (const f of ['app.js', 'style.css', 'detect.js', 'engine.js', 'index.html', 'gzh-qr.jpg', 'douyin-qr.png', 'logo.png']) {
   fs.copyFileSync(path.join(src, f), path.join(dst, f));
 }
 

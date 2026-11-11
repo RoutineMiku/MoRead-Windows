@@ -138,22 +138,25 @@ html[data-layout="portrait"] .pv-read{max-height:44vh;}
 
 /* ---------------- 书架 ---------------- */
 .hero{
-  margin:2px 32px 4px;border-radius:16px;padding:20px 22px;display:flex;gap:20px;align-items:center;
+  margin:2px 32px 4px;border-radius:16px;padding:20px 22px;display:flex;gap:20px;align-items:stretch;
   position:relative;overflow:hidden;color:#eef3fb;
   background:linear-gradient(120deg,#12233f,#1d3a63 45%,#2a4c7d);
   box-shadow:0 18px 40px -26px rgba(16,32,64,.8);
 }
 .hero::after{content:"";position:absolute;right:-60px;top:-90px;width:300px;height:300px;border-radius:50%;
   background:radial-gradient(circle,rgba(120,170,255,.35),transparent 65%);}
-.hero .cover{width:96px;flex:0 0 96px;box-shadow:0 12px 26px -10px rgba(0,0,0,.7);}
-.hero-body{flex:1;min-width:0;position:relative;z-index:1;}
+/* 封面高度跟着右栏走（align-self:stretch），宽高比靠固定宽度控制：
+     右栏内容高度约 154px，96 宽刚好接近真实书封的 1:1.6，上下两端和文字、按钮齐平 */
+.hero .cover{width:96px;flex:0 0 96px;align-self:stretch;box-shadow:0 12px 26px -10px rgba(0,0,0,.7);}
+/* 右栏撑满封面高度：上面文字贴着封面顶端、下面按钮贴着封面底端，左右两侧上下齐平 */
+.hero-body{flex:1;min-width:0;position:relative;z-index:1;display:flex;flex-direction:column;}
 .hero .kicker{font-size:11px;letter-spacing:2.5px;color:#9db6db;margin-bottom:7px;}
 .hero h2{margin:0 0 5px;font-size:21px;font-family:var(--serif);font-weight:600;letter-spacing:1px;}
 .hero .meta{color:#a8bcd9;font-size:12px;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .hero .prog{height:4px;border-radius:4px;background:rgba(255,255,255,.16);overflow:hidden;max-width:400px;}
 .hero .prog i{display:block;height:100%;background:linear-gradient(90deg,#7fb0ff,#c9ddff);border-radius:4px;}
 .hero .prog-txt{font-size:11px;color:#9db6db;margin-top:6px;}
-.hero-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+.hero-actions{display:flex;gap:8px;margin-top:auto;padding-top:12px;flex-wrap:wrap;align-items:flex-end;}
 .hero-actions .btn{flex:0 0 auto;}
 .hero .btn{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.18);color:#fff;box-shadow:none;height:32px;}
 .hero .btn:hover{background:rgba(255,255,255,.24);}
@@ -161,11 +164,12 @@ html[data-layout="portrait"] .pv-read{max-height:44vh;}
 /* 手机窄屏：卡片左右各 32px 边距 + 22px 内边距 + 96px 封面，留给按钮的空间只剩 160 出头，
    两个按钮不换行就被 overflow:hidden 裁掉一半（「从头开始」只剩一半）。收窄边距、缩小封面，
    按钮允许换行，宁可占两行也不截断。 */
-html[data-layout="portrait"] .hero{margin:2px 14px 6px;padding:16px;gap:14px;align-items:flex-start;}
-html[data-layout="portrait"] .hero .cover{width:80px;flex:0 0 80px;}
+html[data-layout="portrait"] .hero{margin:2px 14px 6px;padding:16px;gap:14px;align-items:stretch;}
+html[data-layout="portrait"] .hero .cover{width:100px;flex:0 0 100px;}
 html[data-layout="portrait"] .hero h2{font-size:19px;letter-spacing:.5px;}
 html[data-layout="portrait"] .hero .meta{margin-bottom:10px;}
-html[data-layout="portrait"] .hero-actions .btn{height:34px;padding:0 14px;}
+html[data-layout="portrait"] .hero-actions{flex-wrap:nowrap;}
+html[data-layout="portrait"] .hero-actions .btn{height:34px;padding:0 12px;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 .shelf-head{display:flex;align-items:center;gap:12px;margin:20px 32px 12px;}
 .shelf-head .line{flex:1;height:1px;background:var(--line);}
@@ -446,6 +450,15 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 .toc-item:hover{background:rgba(0,0,0,.045);}
 .toc-item.on{background:rgba(43,108,224,.1);color:var(--accent);font-weight:600;}
 .toc-item span{font-size:10px;color:var(--r-dim);font-family:var(--ui);min-width:24px;}
+.toc-item span.dot{text-align:center;}
+/* 目录分组标题：卷首·附录 / 正文。粘在顶部，长目录滑到哪都知道自己在哪一组 */
+.toc-group{
+  position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:6px;
+  padding:9px 11px 6px;margin-top:2px;font-size:11px;letter-spacing:.6px;color:var(--r-dim);
+  background:linear-gradient(180deg,var(--r-bg) 76%,rgba(0,0,0,0));
+}
+.toc-group em{font-style:normal;font-size:10px;opacity:.75;}
+.toc-group::after{content:"";flex:1;height:1px;background:rgba(0,0,0,.07);}
 .toc-mask{position:absolute;left:300px;right:0;top:50px;bottom:0;display:none;}
 .toc-mask.on{display:block;}
 
@@ -513,6 +526,12 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 .about-qr img{width:112px;height:112px;border-radius:8px;background:#fff;}
 .about-qr span{font-size:12.5px;color:var(--text);line-height:1.7;}
 .about-qr small{color:var(--faint);font-size:11.5px;}
+/* 抖音码：整块可点，点了复制主页链接 */
+.about-qr.dy{cursor:pointer;transition:background .15s,border-color .15s;}
+.about-qr.dy:hover{background:#f4f7fd;border-color:#cfdcf2;}
+.about-qr.dy:active{transform:scale(.995);}
+.about-qr.dy img{width:96px;height:96px;object-fit:cover;}
+html[data-theme="night"] .about-qr.dy:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.16);}
 .about-by{margin-top:14px;font-size:11.5px;color:var(--faint);letter-spacing:.6px;}
 .about-by b{color:var(--muted);font-weight:600;}
 html[data-theme="night"] .about-link{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1);color:#9fc0f5;}

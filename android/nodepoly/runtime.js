@@ -637,7 +637,7 @@
   /* 本地书：把主进程里的 loadParsed / local:chapter 复刻过来 */
   const parsedCache = new Map();
   /* v2：EPUB 图片支持上线后解析结果含 data URL 图片段，换名让老书重新解析一次 */
-  const parsedPath = id => ROOT + '/cache/parsed/' + id + '.v2.json';
+  const parsedPath = id => ROOT + '/cache/parsed/' + id + '.v3.json';
   function loadParsed(book) {
     if (parsedCache.has(book.id)) return parsedCache.get(book.id);
     let chapters = null;

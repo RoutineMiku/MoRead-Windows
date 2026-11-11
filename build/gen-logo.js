@@ -98,7 +98,57 @@ function html(size, withWordmark) {
 ${svg(size, withWordmark)}`;
 }
 
-/* 只开一个 1024 窗口连续截两次图。
+/* 圆形版：系统桌面（圆图标主题）与 android:roundIcon 都用它。
+   直接给 svg 套一层 50% 圆角裁剪，四角透明。 */
+function roundHtml(size, withWordmark) {
+  return `<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}
+.w{width:${size}px;height:${size}px;border-radius:50%;overflow:hidden}svg{display:block}</style>
+<div class="w">${svg(size, withWordmark)}</div>`;
+}
+
+/* 安卓自适应图标是两层叠出来的：108dp 画布、系统只露出中间 72dp（约 66%）。
+   所以：
+   - 背景层 = 满幅深墨渐变（跟电脑版图标同一个色值），系统裁成圆形 / 方形都自然；
+   - 前景层 = 书 + 「墨读」字标，整体缩到 0.7 并居中，正好落进安全区，
+     不会被圆形遮罩切掉字标。
+   两层合起来和电脑版那枚图标是同一个视觉，只是少了外面的圆角方块。 */
+function androidBgHtml(px) {
+  return `<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}svg{display:block}</style>
+<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="ab" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16233c"/>
+      <stop offset=".55" stop-color="#1d3357"/>
+      <stop offset="1" stop-color="#2b4d80"/>
+    </linearGradient>
+    <radialGradient id="ag" cx=".28" cy=".18" r=".78">
+      <stop offset="0" stop-color="#8fb6ff" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#8fb6ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#ab)"/>
+  <rect width="1024" height="1024" fill="url(#ag)"/>
+</svg>`;
+}
+
+function androidFgHtml(px) {
+  return `<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}svg{display:block}</style>
+<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 1024 1024">
+  <g transform="translate(512,494) scale(.75) translate(-512,-512)">
+    ${svgBody(true, false)}
+  </g>
+</svg>`;
+}
+
+function resized(png, size) {
+  return nativeImage.createFromBuffer(png)
+    .resize({ width: size, height: size, quality: 'best' }).toPNG();
+}
+
+/* 只开一个 1024 窗口连续截图。
    小窗口（<100px）capturePage 会报 UnknownVizError，而且失败后同进程再开窗
    会连带 ERR_FAILED —— 所以固定主尺寸渲染、其余靠高质量缩放。 */
 async function shootHtml(win, key, htmlStr, rect) {
@@ -111,21 +161,6 @@ async function shootHtml(win, key, htmlStr, rect) {
   return png;
 }
 const shoot = (win, size, withWordmark) => shootHtml(win, withWordmark ? 'w' : 'm', html(size, withWordmark));
-
-/* 安卓自适应图标前景层：108dp 里只有中间 72dp 是安全区，
-   所以给一个「裁剪过」的画布 —— 只画书，四周留足余量，别被系统裁掉。 */
-function fgHtml(px) {
-  return `<!doctype html><meta charset="utf-8">
-<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}svg{display:block}</style>
-<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="112 53 800 800">
-  ${svgBody(false, false)}
-</svg>`;
-}
-
-function resized(png, size) {
-  return nativeImage.createFromBuffer(png)
-    .resize({ width: size, height: size, quality: 'best' }).toPNG();
-}
 
 /* ICO 容器：每帧直接塞 PNG（Vista 起支持），免去 BMP 编码 */
 function ico(frames) {
@@ -151,7 +186,11 @@ app.whenReady().then(async () => {
   });
   const big = await shoot(win, 1024, true);    // 带字标主稿
   const mark = await shoot(win, 1024, false);  // 纯图形主稿（小尺寸用）
-  const fg = await shootHtml(win, 'fg', fgHtml(432), { x: 0, y: 0, width: 432, height: 432 }); // 安卓自适应图标前景（108dp@4x）
+  const rndBig = await shootHtml(win, 'rw', roundHtml(1024, true));     // 圆形版（带字标）
+  const rndMark = await shootHtml(win, 'rm', roundHtml(1024, false));   // 圆形版（小尺寸）
+  /* 安卓自适应图标的背景层：和电脑版完全同一枚图标，只是满幅、不切圆角 */
+  const adBg = await shootHtml(win, 'ab', androidBgHtml(432), { x: 0, y: 0, width: 432, height: 432 });
+  const adFg = await shootHtml(win, 'af', androidFgHtml(432), { x: 0, y: 0, width: 432, height: 432 });
   win.destroy();
 
   if (PREVIEW) {
@@ -180,12 +219,45 @@ app.whenReady().then(async () => {
   fs.writeFileSync(path.join(ROOT, 'build/icon.ico'), ico(frames));
   console.log('写入 build/icon.ico（7 帧）');
 
-  const fgPath = path.join(ROOT, 'android/app/src/main/res/drawable/ic_launcher_foreground.png');
-  if (fs.existsSync(path.dirname(fgPath))) {
-    fs.writeFileSync(fgPath, fg);
-    const xml = path.join(ROOT, 'android/app/src/main/res/drawable/ic_launcher_foreground.xml');
-    if (fs.existsSync(xml)) fs.unlinkSync(xml);   // 同名资源只能留一个
-    console.log('写入 android drawable/ic_launcher_foreground.png 432x432');
+  /* ---------------- 安卓 ----------------
+     以前只有 mipmap-anydpi-v26 的自适应图标，前景是一枚「没字标的书」，
+     和电脑版对不上（用户反馈：手机上找不到墨读）。现在：
+     1) 自适应图标背景层 = 电脑版同款满幅图标，前景透明，系统按自己的形状裁；
+     2) 补齐 API<26 用的 mipmap 各密度 PNG（之前完全没写，老设备根本没图标）；
+     3) 圆形图标另出一套（android:roundIcon）。 */
+  const resDir = path.join(ROOT, 'android/app/src/main/res');
+  if (fs.existsSync(resDir)) {
+    const drawable = path.join(resDir, 'drawable');
+    fs.mkdirSync(drawable, { recursive: true });
+    fs.writeFileSync(path.join(drawable, 'ic_launcher_bg.png'), adBg);
+    fs.writeFileSync(path.join(drawable, 'ic_launcher_fg.png'), adFg);
+    for (const dead of ['ic_launcher_foreground.png', 'ic_launcher_foreground.xml']) {
+      const p = path.join(drawable, dead);
+      if (fs.existsSync(p)) fs.unlinkSync(p);          // 换了层级名字，旧的清掉免得混淆
+    }
+    console.log('写入 android drawable/ic_launcher_bg.png + ic_launcher_fg.png（自适应两层）');
+
+    const DENSITY = { mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 };
+    for (const [d, size] of Object.entries(DENSITY)) {
+      const dir = path.join(resDir, 'mipmap-' + d);
+      fs.mkdirSync(dir, { recursive: true });
+      /* 48/72 这种小尺寸带字标会糊成一团，跟 ico 一样换成纯图形（Windows 任务栏同理） */
+      fs.writeFileSync(path.join(dir, 'ic_launcher.png'), at(size, size >= 96 ? big : mark));
+      fs.writeFileSync(path.join(dir, 'ic_launcher_round.png'), at(size, size >= 96 ? rndBig : rndMark));
+    }
+    console.log('写入 android mipmap 五档（ic_launcher / ic_launcher_round）');
+
+    const adaptive = `<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_bg" />
+    <foreground android:drawable="@drawable/ic_launcher_fg" />
+</adaptive-icon>
+`;
+    for (const f of ['ic_launcher.xml', 'ic_launcher_round.xml']) {
+      const p = path.join(resDir, 'mipmap-anydpi-v26', f);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, adaptive);
+    }
+    console.log('更新 android mipmap-anydpi-v26/*.xml（背景 = 电脑版图标）');
   }
 
   app.quit();
