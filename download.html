@@ -7,7 +7,7 @@
 <title>墨读 0.6.12 · 下载安装包</title>
 <style>
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;padding:0}
+  html,body{margin:0;padding:0;overflow-x:hidden}
   body{
     background:#12151b;color:#f2f3f5;
     font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
@@ -27,8 +27,9 @@
     background:linear-gradient(135deg,#1e2430,#191d26);border:1px solid #2c3442;
     border-radius:16px;padding:18px 20px;text-decoration:none;color:inherit;margin-bottom:34px;
   }
+  .web>span:first-child{flex:1;min-width:0;overflow:hidden}
   .web b{font-size:17px;display:block;margin-bottom:4px}
-  .web i{font-style:normal;font-size:12.5px;color:#98a0af}
+  .web i{font-style:normal;font-size:12.5px;color:#98a0af;display:block;word-break:break-word}
   .web .go{
     flex:0 0 auto;background:#c9462f;color:#fff;font-size:13px;font-weight:600;
     padding:9px 16px;border-radius:999px;letter-spacing:1px;
@@ -38,18 +39,18 @@
     display:flex;align-items:center;justify-content:space-between;gap:12px;
     padding:14px 0;border-bottom:1px solid #262c37;
   }
-  .item .l{min-width:0}
+  .item .l{flex:1;min-width:0;overflow:hidden}
   .item b{font-size:15.5px;font-weight:500;display:block}
-  .item small{font-size:11.5px;color:#7d8697;letter-spacing:.3px}
+  .item small{font-size:11.5px;color:#7d8697;letter-spacing:.3px;display:block;word-break:break-word}
   .item a{
-    flex:0 0 auto;text-decoration:none;color:#f2f3f5;border:1px solid #39424f;
+    flex:0 0 auto;white-space:nowrap;text-decoration:none;color:#f2f3f5;border:1px solid #39424f;
     border-radius:999px;padding:8px 14px;font-size:12.5px;letter-spacing:.5px;
     background:#1b2029;
   }
   .item a.hot{background:#c9462f;border-color:#c9462f;color:#fff;font-weight:600}
   .note{
     margin-top:26px;padding:16px 18px;background:#1a1f28;border-left:3px solid #c9462f;
-    border-radius:0 10px 10px 0;font-size:12.5px;color:#9ba4b3;line-height:1.9;
+    border-radius:0 10px 10px 0;font-size:12.5px;color:#9ba4b3;line-height:1.9;word-break:break-word;
   }
   .note b{color:#e6e8ec;font-weight:600}
   .qr-row{display:flex;gap:26px;justify-content:center;margin:38px 0 8px}
