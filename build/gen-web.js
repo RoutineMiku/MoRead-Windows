@@ -40,6 +40,7 @@ copy('ui/douyin-qr.png', path.join(out, 'douyin-qr.png'));
 copy('ui/logo.png', path.join(out, 'logo.png'));
 /* 下载落地页：公众号 / 抖音图文里的二维码扫到这里，按设备选安装包 */
 copy('web/download.html', path.join(out, 'download.html'));
+copy('web/privacy.html', path.join(out, 'privacy.html'));
 
 /* ---- 2. bridge.js：Node 兼容层 + src 模块（与安卓同一份 runtime） ---- */
 const mods = {};
