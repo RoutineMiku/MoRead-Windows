@@ -1,7 +1,7 @@
 /* 墨读网页版 Service Worker：只缓存应用外壳（同源静态文件）。
  * 书源/代理请求是跨域的，fetch 拦截里直接放行，绝不缓存、绝不转发。
  * CACHE 里的版本号由 build/gen-web.js 注入，发新版自动作废旧缓存。 */
-const CACHE = 'moread-web-0.6.12-202611111307';
+const CACHE = 'moread-web-0.6.13-202611140845';
 const ASSETS = [
   './',
   './index.html',

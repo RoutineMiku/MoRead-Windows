@@ -516,6 +516,13 @@ body.is-full .reader-top{padding-top:0;height:48px;flex:0 0 48px;}
 .about-logo{width:84px;height:84px;border-radius:20px;box-shadow:0 10px 24px -12px rgba(20,30,50,.5);}
 .about-name{font-family:var(--serif);font-size:22px;font-weight:600;letter-spacing:4px;margin-top:6px;}
 .about-ver{font-size:12px;color:var(--faint);letter-spacing:.5px;}
+.about-upd{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;margin:9px 0 2px;}
+.about-upd span{font-size:11.5px;color:var(--muted);line-height:1.5;text-align:left;max-width:252px;}
+.upd-new{color:#c0392b !important;font-weight:600;}
+.upd-ok{color:#2e7d32 !important;}
+.upd-err{color:#c0392b !important;}
+html[data-theme="night"] .upd-new{color:#ff8f80 !important;}
+html[data-theme="night"] .upd-ok{color:#7ddb8a !important;}
 .about-desc{margin:10px 0 4px;font-size:12.5px;line-height:1.75;color:var(--muted);}
 .about-link{display:inline-flex;align-items:center;gap:7px;margin-top:6px;padding:8px 14px;border-radius:999px;
   background:#f3f6fb;border:1px solid #e4ebf6;color:#2a4c86;font-size:12.5px;text-decoration:none;}

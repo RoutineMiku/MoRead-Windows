@@ -3239,6 +3239,8 @@ addEventListener('message', e => {
             <button class="btn sm" id="open-about">查看</button></div>
           <div class="row"><div class="rl">版本<small>${IS_ANDROID ? `墨读 ${esc(S.info.version)} · Android` : (S.info.platform === 'web' ? `墨读 ${esc(S.info.version)} · 网页版` : (S.info.platform === 'ios' || S.info.platform === 'harmony') ? `墨读 ${esc(S.info.version)} · ${OS_NAME()}` : `墨读 ${esc(S.info.version)} · Electron ${esc(S.info.electron)} · Node ${esc(S.info.node)}`)}</small></div>
             <span class="rv">${IS_ANDROID ? '数据只存本机' : (S.info.portable ? '便携模式 · 数据在程序目录' : '数据只存本地')}</span></div>
+          <div class="row"><div class="rl">检查更新<small id="upd-note">从 Gitee 与 GitHub 的 release 读取最新版本</small></div>
+            <button class="btn sm" id="upd-check">检查</button></div>
           <div class="row"><div class="rl">数据位置<small>${esc(S.info.paths.root)}</small></div>
             ${IS_ANDROID ? '' : '<button class="link" id="open-dir2">打开</button>'}</div>
           <div class="row"><div class="rl">书源格式<small>兼容 Legado(阅读) bookSource JSON 的常用字段；xpath/复杂 JS 规则可能不生效</small></div></div>
@@ -3336,6 +3338,7 @@ addEventListener('message', e => {
     if ($('#open-dir')) $('#open-dir').onclick = () => mo.openDir && mo.openDir();
     if ($('#open-dir2')) $('#open-dir2').onclick = () => mo.openDir && mo.openDir();
     if ($('#open-about')) $('#open-about').onclick = aboutPanel;
+    if ($('#upd-check')) $('#upd-check').onclick = () => runUpdateUI($('#upd-check'), $('#upd-note'));
     /* 网页版：书源代理地址（存 localStorage，由浏览器桥的 http 层读取） */
     if ($('#web-proxy')) $('#web-proxy').onchange = () => {
       try { localStorage.setItem('moread.proxy', $('#web-proxy').value.trim()); } catch (e) { }
@@ -4877,6 +4880,119 @@ addEventListener('message', e => {
     setTimeout(speakNext, 60);
   }
 
+  /* ---------------- 检查更新 ----------------
+     Gitee 主源（国内直连稳），GitHub 兜底；两边都读 releases/latest，取版本高的。
+     网页版默认不主动发网络请求，所以只在用户点「检查」时才请求，结果缓存 30 分钟。 */
+  const GITEE_REPO = 'daily-miku/moread';
+  const GH_REPO = 'RoutineMiku/MoRead-Windows';
+  const GITEE_HOME = 'https://gitee.com/' + GITEE_REPO;
+  const GH_HOME = 'https://github.com/' + GH_REPO;
+  const DOWNLOAD_URL = 'https://routinemiku.github.io/MoRead-Windows/download.html';
+  const UPDATE_KEY = 'moread.update';
+
+  function openExternal(url) {
+    try {
+      if (mo.openExternal) return mo.openExternal(url);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      try { window.open(url, '_blank', 'noopener'); } catch (_) { toast('打不开这个地址'); }
+    }
+  }
+
+  const verParts = v => String(v || '').replace(/^v/i, '').split(/[.\-+]/).slice(0, 3).map(n => parseInt(n, 10) || 0);
+  function cmpVer(a, b) {
+    const x = verParts(a), y = verParts(b);
+    for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i];
+    return 0;
+  }
+
+  async function fetchJSON(url, ms) {
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = setTimeout(() => { if (ctl) ctl.abort(); }, ms || 6000);
+    try {
+      const r = await fetch(url, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+        signal: ctl ? ctl.signal : undefined
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return await r.json();
+    } finally { clearTimeout(timer); }
+  }
+
+  function pickRelease(j, source) {
+    if (!j || !j.tag_name) return null;
+    return {
+      source,
+      version: String(j.tag_name).replace(/^v/i, ''),
+      tag: String(j.tag_name),
+      url: j.html_url || (source === 'Gitee' ? GITEE_HOME + '/releases' : GH_HOME + '/releases'),
+      notes: String(j.body || '').slice(0, 400),
+      at: j.published_at || j.created_at || ''
+    };
+  }
+
+  async function checkUpdate(force) {
+    if (!force) {
+      try {
+        const c = JSON.parse(localStorage.getItem(UPDATE_KEY) || 'null');
+        if (c && c.at && Date.now() - c.at < 30 * 60 * 1000) return c.result;
+      } catch (e) { }
+    }
+    const all = (await Promise.all([
+      fetchJSON(`https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/latest`)
+        .then(j => pickRelease(j, 'Gitee')).catch(() => null),
+      fetchJSON(`https://api.github.com/repos/${GH_REPO}/releases/latest`)
+        .then(j => pickRelease(j, 'GitHub')).catch(() => null)
+    ])).filter(Boolean);
+    if (!all.length) throw new Error('Gitee 和 GitHub 都没连上');
+    all.sort((a, b) => cmpVer(b.version, a.version));
+    const best = all[0];
+    const result = {
+      current: S.info.version,
+      latest: best.version,
+      source: best.source,
+      sourceUrl: best.url,
+      hasNew: cmpVer(best.version, S.info.version) > 0,
+      at: Date.now()
+    };
+    try { localStorage.setItem(UPDATE_KEY, JSON.stringify({ at: result.at, result })); } catch (e) { }
+    return result;
+  }
+
+  /* 一个按钮两种状态：平时是「检查」，发现新版变「去下载」 */
+  async function runUpdateUI(btn, note) {
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = '检查中…';
+    btn.onclick = null;
+    if (note) { note.className = ''; note.textContent = '正在读取 Gitee / GitHub …'; }
+    try {
+      const r = await checkUpdate(true);
+      btn.disabled = false;
+      if (r.hasNew) {
+        if (note) {
+          note.className = 'upd-new';
+          note.innerHTML = `发现新版本 <b>v${esc(r.latest)}</b> · 来自 ${esc(r.source)}`;
+        }
+        btn.textContent = '去下载';
+        btn.onclick = () => openExternal(DOWNLOAD_URL);
+      } else {
+        if (note) {
+          note.className = 'upd-ok';
+          note.textContent = `已是最新 v${r.current} · ${r.source} 检查于 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
+        }
+        btn.textContent = '再检查';
+        btn.onclick = () => runUpdateUI(btn, note);
+      }
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = '重试';
+      if (note) { note.className = 'upd-err'; note.textContent = '检查失败：' + (e.message || '网络不通'); }
+      btn.onclick = () => runUpdateUI(btn, note);
+    }
+  }
+
   /* 关于我们：版本、开源地址、公众号二维码、作者抖音。
      三端共用这一个弹窗，图片走相对路径（ui/ 与 dist-web 里各放一份）。 */
   const GITHUB_URL = 'https://github.com/RoutineMiku/MoRead-Windows';
@@ -4888,6 +5004,7 @@ addEventListener('message', e => {
       <img class="about-logo" src="logo.png" alt="墨读" />
       <div class="about-name">墨读</div>
       <div class="about-ver">v${esc(S.info.version)} · ${plat}</div>
+      <div class="about-upd"><button class="btn sm" id="ab-upd">检查更新</button><span id="ab-upd-note"></span></div>
       <p class="about-desc">本地优先的阅读器。书架、书源、进度、备份都在你自己手里，不上传、不追踪，换设备用备份文件搬走。</p>
       <a class="about-link" href="${GITHUB_URL}" target="_blank" rel="noreferrer noopener">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -4905,6 +5022,8 @@ addEventListener('message', e => {
     </div>
     <div class="modal-actions"><button class="btn primary" id="ab-ok">知道了</button></div>`);
     $('#ab-ok').onclick = closeModal;
+    const ub = $('#ab-upd');
+    if (ub) ub.onclick = () => runUpdateUI(ub, $('#ab-upd-note'));
     const dy = $('#ab-dy');
     const copy = async () => {
       const ok = await copyText(DOUYIN_URL);
