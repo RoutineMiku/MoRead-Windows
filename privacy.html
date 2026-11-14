@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="theme-color" content="#12151b" />
+<title>墨读 · 隐私政策</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#12151b;color:#e8eaee;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.85;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:680px;margin:0 auto;padding:44px 22px 64px}
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:30px}
+  .brand img{width:44px;height:44px;border-radius:11px}
+  .brand b{font-size:18px;letter-spacing:2px}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:.5px}
+  .date{font-size:12.5px;color:#8b93a2;margin-bottom:28px}
+  h2{font-size:15px;margin:30px 0 8px;color:#f2f3f5}
+  p,li{font-size:14px;color:#b9c0cc;margin:0 0 10px}
+  ul{padding-left:20px;margin:0 0 10px}
+  strong{color:#f2f3f5;font-weight:600}
+  .box{background:#1a1f28;border-left:3px solid #c9462f;border-radius:0 10px 10px 0;padding:14px 16px;margin:18px 0;font-size:13.5px;color:#9ba4b3}
+  a{color:#8fb6f5;text-decoration:none}
+  a:hover{text-decoration:underline}
+  .foot{margin-top:40px;padding-top:18px;border-top:1px solid #262c37;font-size:12px;color:#6b7484}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><img src="logo.png" alt="墨读" /><b>墨读 MoRead</b></div>
+
+  <h1>隐私政策</h1>
+  <p class="date">最后更新：2026 年 11 月 14 日</p>
+
+  <div class="box">
+    一句话版本：<strong>墨读不收集你的任何个人信息</strong>。书架、书源、阅读进度和备份都只存在你自己的设备上，我们没有服务器，也没有账号系统。
+  </div>
+
+  <h2>1. 我们收集什么</h2>
+  <p>不收集。墨读没有注册、登录、统计 SDK 或广告 SDK，不会上传设备信息、位置、通讯录、剪贴板或阅读记录。</p>
+
+  <h2>2. 数据存在哪里</h2>
+  <ul>
+    <li><strong>Windows / macOS / Linux</strong>：默认在系统的应用数据目录（如 <code>%APPDATA%\墨读</code>）；如果程序目录里有 <code>portable.txt</code>，则写在程序旁边的 <code>data/</code>。</li>
+    <li><strong>Android / iOS / 鸿蒙</strong>：应用私有目录，卸载即删除。</li>
+    <li><strong>网页版</strong>：浏览器本地存储（IndexedDB / localStorage）。</li>
+  </ul>
+  <p>这些数据只有你能访问，开发者看不到，也无法远程读取或恢复。</p>
+
+  <h2>3. 什么时候会联网</h2>
+  <ul>
+    <li><strong>书源搜索与正文</strong>：请求你自己导入的书源站点。请求内容取决于书源规则，与墨读开发者无关。</li>
+    <li><strong>网页搜书</strong>：请求你选择的搜索引擎。</li>
+    <li><strong>云端备份</strong>：只有你在「设置 → 云端同步」里填了 WebDAV 地址并启用后，才会连接你自己的网盘。</li>
+    <li><strong>检查更新</strong>：只有你点「检查更新」时，才会向 GitHub / Gitee 的公开接口读取最新版本号，不发送任何设备标识或使用数据。</li>
+    <li><strong>本地导入</strong>：解析本地书籍、生成封面缩略图都在本机完成，不上传文件。</li>
+  </ul>
+
+  <h2>4. 第三方</h2>
+  <p>应用本身不集成第三方统计或广告服务。你在应用内打开的第三方网页（书源站点、开源仓库、作者公众号/抖音）受各自隐私政策约束。</p>
+
+  <h2>5. 儿童隐私</h2>
+  <p>墨读不面向儿童收集任何信息，也不包含社交、支付或用户生成内容功能。</p>
+
+  <h2>6. 你的控制权</h2>
+  <p>你可以随时在「设置 → 数据与备份」导出或删除全部数据；卸载应用会删除应用私有目录中的内容。</p>
+
+  <h2>7. 政策变更</h2>
+  <p>如果未来功能变化导致本政策调整，会更新本页顶部的日期，并在应用内说明。</p>
+
+  <h2>8. 联系方式</h2>
+  <p>问题或建议：<a href="https://github.com/RoutineMiku/MoRead-Windows/issues">GitHub Issues</a> · <a href="https://gitee.com/daily-miku/moread/issues">Gitee Issues</a></p>
+
+  <div class="foot">
+    墨读 MoRead · 开源免费 · 数据都在本地<br />
+    <a href="./">返回墨读网页版</a> · <a href="./download.html">下载安装包</a>
+  </div>
+</div>
+</body>
+</html>
