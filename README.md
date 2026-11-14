@@ -7,7 +7,7 @@
 > 存档格式与原版「阅读」双向兼容，可以直接导入原版「阅读」导出的 zip 备份。
 > 同一套 `ui/` 跑在七个地方：Windows / Linux / macOS / Android / 浏览器 / 鸿蒙 / iOS。
 
-**下载**（最新是 [Releases · v0.6.13](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.13)；iOS 15+ 仍是旧版本（本期没有重出），链接指向旧标签，能用但功能落后）：
+**下载**（全平台产物都在 [Releases · v0.6.13](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.13)，各平台同一套 `ui/`）：
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
@@ -19,7 +19,7 @@
 | macOS Apple Silicon | [`MoRead-mac-arm64-0.6.13.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.13/MoRead-mac-arm64-0.6.13.zip) | 同上 |
 | 鸿蒙 4.x 及以下 | 同上 APK | 系统自带安卓兼容，直接装 |
 | 鸿蒙 NEXT (5.0) | [`MoRead-harmony-0.6.13.hap`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.13/MoRead-harmony-0.6.13.hap) · [自签版](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.13/MoRead-harmony-0.6.13-signed.hap) | ArkWeb 壳；未签名包用 DevEco 自动签名或自己的证书，自签版可直接 `hdc install`，见 `harmony/README.md` |
-| iOS 15+ | [`MoRead-0.6.12-unsigned.ipa`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.12/MoRead-0.6.12-unsigned.ipa) | 未签名 ipa（GitHub Actions 的 macOS runner 编的），Sideloadly 填自己 Apple ID 装，见 `ios/README.md` |
+| iOS 15+ | [`MoRead-0.6.13-unsigned.ipa`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.13/MoRead-0.6.13-unsigned.ipa) | 未签名 ipa（GitHub Actions 的 macOS runner 编的），Sideloadly 填自己 Apple ID 装，见 `ios/README.md` |
 | 网页版 / iPad PWA | **<https://routinemiku.github.io/MoRead-Windows/>** | 免安装免账号，Safari「添加到主屏幕」即得全屏图标 |
 
 各平台怎么打、有哪些已知限制：**[docs/platforms.md](docs/platforms.md)**
