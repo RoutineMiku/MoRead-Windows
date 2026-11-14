@@ -7,7 +7,7 @@
 > 存档格式与原版「阅读」双向兼容，可以直接导入原版「阅读」导出的 zip 备份。
 > 同一套 `ui/` 跑在七个地方：Windows / Linux / macOS / Android / 浏览器 / 鸿蒙 / iOS。
 
-**下载**（全平台产物都在 [Releases · v0.6.12](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.12)，各平台同一套 `ui/`）：
+**下载**（最新是 [Releases · v0.6.13](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.13)；Windows x64 / Android 7+ / Linux x64 / Linux arm64 / macOS Intel / macOS Apple Silicon / 鸿蒙 NEXT (5.0) / iOS 15+ 仍是旧版本（本期没有重出），链接指向旧标签，能用但功能落后）：
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
