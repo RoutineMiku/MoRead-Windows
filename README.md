@@ -7,19 +7,19 @@
 > 存档格式与原版「阅读」双向兼容，可以直接导入原版「阅读」导出的 zip 备份。
 > 同一套 `ui/` 跑在七个地方：Windows / Linux / macOS / Android / 浏览器 / 鸿蒙 / iOS。
 
-**下载**（全平台产物都在 [Releases · v0.6.10](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.10)，各平台同一套 `ui/`）：
+**下载**（全平台产物都在 [Releases · v0.6.12](https://github.com/RoutineMiku/MoRead-Windows/releases/tag/v0.6.12)，各平台同一套 `ui/`）：
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| Windows x64 | [`MoRead-windows-0.6.10.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-windows-0.6.10.zip) | 解压后双击 `墨读.exe`，免安装、不写注册表，数据跟着程序走 |
-| Android 7+ | [`MoRead-android-0.6.10.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-android-0.6.10.apk) | 直接安装，WebView 内置 Node 兼容层（versionCode 610） |
-| Linux x64 | [`MoRead-linux-x64-0.6.10.tar.gz`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-linux-x64-0.6.10.tar.gz) | 解压 → `./moread` 运行；`./install.sh` 装进应用菜单 |
-| Linux arm64 | [`MoRead-linux-arm64-0.6.10.tar.gz`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-linux-arm64-0.6.10.tar.gz) | 同上，树莓派 / ARM 小主机 |
-| macOS Intel | [`MoRead-mac-x64-0.6.10.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-mac-x64-0.6.10.zip) | 未签名：首次右键 → 打开，或 `xattr -dr com.apple.quarantine MoRead.app` |
-| macOS Apple Silicon | [`MoRead-mac-arm64-0.6.10.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-mac-arm64-0.6.10.zip) | 同上 |
+| Windows x64 | [`MoRead-windows-0.6.12.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.12/MoRead-windows-0.6.12.zip) | 解压后双击 `墨读.exe`，免安装、不写注册表，数据跟着程序走 |
+| Android 7+ | [`MoRead-android-0.6.12.apk`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.12/MoRead-android-0.6.12.apk) | 直接安装，WebView 内置 Node 兼容层（versionCode 612） |
+| Linux x64 | [`MoRead-linux-x64-0.6.12.tar.gz`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.12/MoRead-linux-x64-0.6.12.tar.gz) | 解压 → `./moread` 运行；`./install.sh` 装进应用菜单 |
+| Linux arm64 | [`MoRead-linux-arm64-0.6.12.tar.gz`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.12/MoRead-linux-arm64-0.6.12.tar.gz) | 同上，树莓派 / ARM 小主机 |
+| macOS Intel | [`MoRead-mac-x64-0.6.12.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.12/MoRead-mac-x64-0.6.12.zip) | 未签名：首次右键 → 打开，或 `xattr -dr com.apple.quarantine MoRead.app` |
+| macOS Apple Silicon | [`MoRead-mac-arm64-0.6.12.zip`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.12/MoRead-mac-arm64-0.6.12.zip) | 同上 |
 | 鸿蒙 4.x 及以下 | 同上 APK | 系统自带安卓兼容，直接装 |
-| 鸿蒙 NEXT (5.0) | [`MoRead-harmony-0.6.10.hap`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-harmony-0.6.10.hap) · [自签版](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-harmony-0.6.10-signed.hap) | ArkWeb 壳；未签名包用 DevEco 自动签名或自己的证书，自签版可直接 `hdc install`，见 `harmony/README.md` |
-| iOS 15+ | [`MoRead-0.6.10-unsigned.ipa`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.10/MoRead-0.6.10-unsigned.ipa) | 未签名 ipa（GitHub Actions 的 macOS runner 编的），Sideloadly 填自己 Apple ID 装，见 `ios/README.md` |
+| 鸿蒙 NEXT (5.0) | [`MoRead-harmony-0.6.12.hap`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.12/MoRead-harmony-0.6.12.hap) · [自签版](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.12/MoRead-harmony-0.6.12-signed.hap) | ArkWeb 壳；未签名包用 DevEco 自动签名或自己的证书，自签版可直接 `hdc install`，见 `harmony/README.md` |
+| iOS 15+ | [`MoRead-0.6.12-unsigned.ipa`](https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.12/MoRead-0.6.12-unsigned.ipa) | 未签名 ipa（GitHub Actions 的 macOS runner 编的），Sideloadly 填自己 Apple ID 装，见 `ios/README.md` |
 | 网页版 / iPad PWA | **<https://routinemiku.github.io/MoRead-Windows/>** | 免安装免账号，Safari「添加到主屏幕」即得全屏图标 |
 
 各平台怎么打、有哪些已知限制：**[docs/platforms.md](docs/platforms.md)**
@@ -121,11 +121,26 @@ DATA_DIR=./data STATIC_DIR=./dist-web PORT=8080 node server/gateway.js
 - EPUB 里的图片三种写法都认：普通 `<img>`、calibre 打包的 `<svg><image xlink:href="cover.jpeg"/></svg>` 外壳、
   以及矢量 `<svg>` 折线图。calibre 转出来的那种 svg 外壳，图片地址会被读出来重新内嵌 —— 以前这类插图是一片空白
 
-### 扩展（书源 / 阅读历史 / 阅读统计）
+### 扩展（书源 / 阅读历史 / 阅读统计 / 添加扩展）
 侧栏只留 **书架 / 扩展 / 设置** 三个入口，其余功能都收进「扩展」：
 - 进去是三个卡片（书源 · N 个、历史 · N 条、统计 · 今天读了多少），点进去就是原来的整页功能，左上角「← 扩展」退回菜单
 - 以后加新功能（比如订阅、字典、自定义主题）都在这里挂一张卡，不用再往侧栏挤
 - 手机竖屏同样是一列卡片，返回键先回扩展菜单再回书架
+
+**添加扩展**（菜单最后一张虚线卡）是给开发者留的口子：
+- 打开就是一页教程：扩展格式、三步流程、面板能用的宿主接口，页内还能一键「填入示例」直接跑起来
+- 导入方式三种：把 `.json` / `.html` 拖进窗口、粘贴内容后点「导入」、点「选文件」挑一个（手机上是系统文件选择器）
+- 导入成功后扩展菜单立刻多一张卡，点开就是面板；「已安装」里可以打开 / 移除，同名再导入会问一次覆盖
+- 面板是 sandbox iframe，读不到书库和存档，需要数据就走 `postMessage`（`toast` / `context` / `search` / `openBook` / `shelf`）
+- 扩展跟着 `data.json` 存，备份、换设备、导出恢复都一起带走；分发给别人只要给那一个 JSON 文件
+
+### 设置（同样是两级）
+设置项越加越多，一页铺到底手机上要划十几屏，所以也拆成了模块入口：
+- 进去先看一屏卡片：**阅读 / 朗读 / 书架 / 搜索与网络 / 数据与备份 / 云端同步 / 系统 / 关于**，
+  右边挂着当前状态（`22px · 1.7 行距`、`自动下一章`、`本机目录`、`已配置`、`v0.6.11`），点进哪张只看那一组
+- 「← 设置」或手机返回键退回菜单，再退才回书架；改动照旧即时生效，没有「保存」按钮
+- 原来挤在「系统」里的书架排序、封面大小、搜索并发与书源数分到了各自模块，数据目录/缓存和导出恢复合成「数据与备份」
+- 窄屏放不下「名字 + 说明 + 状态 + 箭头」四样时先舍状态，保证说明完整一行
 
 ### 书源（对标 Legado）
 - 导入 Legado 书源 JSON（文件或粘贴），字段映射 `bookSourceName` `bookSourceUrl` `searchUrl` `ruleSearch` `ruleBookInfo` `ruleToc` `ruleContent`
@@ -341,7 +356,7 @@ test/scroll-continue.js 滚动连续阅读检查（到底自动续下一章、�
 - **网络走异步桥**：以前书源请求是同步桥（`callSync` → OkHttp 阻塞执行），一条挂起的连接会把 WebView 的 JS 线程整个冻住——书源失效时页面点哪都没反应，换源并发八个 worker 其实是排成一队挨个冻。现在原生侧开了线程池（`callAsync`），结果用 `evaluateJavascript` 回填 Promise，挂起的请求只影响它自己，「加载中…」期间界面照常能点、能返回。目录 / 正文抓取另有 30 秒上限兜底，不再无限转圈。
 - **桌面专属功能不再串到手机**：阅读器顶栏的「全屏(F11)」「✕」在安卓上没有意义（本来就是全屏应用、返回键就能退），已从小屏界面摘掉，只留「书架 / 换源 / 目录 / 书签」。
 - **图标与桌面同款**：以前安卓只有一枚「纯书、没有字标」的前景图，装完在桌面上跟电脑版对不上。现在自适应图标的背景层就是电脑版那层深墨渐变、前景层是「书 + 墨读」字标（缩到 0.75 落在安全区，圆形遮罩也切不掉字），另外补齐了 API<26 用的五档 mipmap PNG 和圆形图标（`roundIcon`）——以前这两样是缺的，老设备根本没图标。
-- **返回键按层级走**：弹窗 → 目录/书签抽屉 → 阅读器 → 扩展子页退扩展菜单 → 网页搜书退回搜索结果 → 书架 → 系统；
+- **返回键按层级走**：弹窗 → 目录/书签抽屉 → 阅读器 → 扩展子页退扩展菜单 → 设置子页退设置菜单 → 网页搜书退回搜索结果 → 书架 → 系统；
   网页搜书里点进某个站之后按返回先退回结果那一页，退无可退才回书架。
 - **换源更明确**：只锁住被点的那本（以前点第 3 本变灰的是第 1 本），失败会还原按钮并说明原因；换成功后书架卡片的来源名 / 进度同步刷新。
 

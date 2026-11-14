@@ -73,6 +73,7 @@
     group: 'all',
     info: null,
     ext: null,          /* 扩展页里当前打开的子页：sources / history / stats / null（菜单） */
+    set: null,          /* 设置页里当前打开的模块：read / tts / shelf / search / data / dav / system / about / null（菜单） */
     searchMode: 'src',  /* 搜索方式：src=书源，web=网页搜书 */
     srcQ: '',
     srcG: 'all',
@@ -442,25 +443,138 @@
       }
     }
   ];
-  const EXT_NAME = { sources: '书源', history: '阅读历史', stats: '阅读统计' };
+  const EXT_NAME = { sources: '书源', history: '阅读历史', stats: '阅读统计', addon: '添加扩展' };
+
+  /* ---------------- 用户导入的扩展 ----------------
+   * 开发者写一个 HTML 面板（或给一个站点地址），包成 JSON 导进来，扩展菜单就多
+   * 一张卡；点开就是面板。面板跑在 sandbox iframe 里，跟宿主只通过 postMessage
+   * 说话（教程与接口清单见「添加扩展」子页）：
+   *   parent.postMessage({ moread:'toast',  text:'导入成功' }, '*')
+   *   parent.postMessage({ moread:'context' }, '*')          → 宿主回 context
+   *   parent.postMessage({ moread:'search', q:'书名' }, '*')
+   *   parent.postMessage({ moread:'openBook', id:'…', chapter:0 }, '*')
+   * 存 data.json 的 addons 数组，跟着备份/换设备一起走。 */
+  const ADDON_ICONS = {
+    puzzle: '<path d="M10 4.6a2 2 0 1 1 4 0V6h2.4A1.6 1.6 0 0 1 18 7.6V10h1.4a2 2 0 1 1 0 4H18v2.4A1.6 1.6 0 0 1 16.4 18H14v-1.4a2 2 0 1 0-4 0V18H7.6A1.6 1.6 0 0 1 6 16.4V14H4.6a2 2 0 1 1 0-4H6V7.6A1.6 1.6 0 0 1 7.6 6H10z"/>',
+    plus: '<path d="M12 5.2v13.6M5.2 12h13.6"/>',
+    timer: '<circle cx="12" cy="13.2" r="6.8"/><path d="M12 9.8v3.6l2.2 1.4M9.4 3.6h5.2"/>',
+    star: '<path d="M12 4.4l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16.8l-4.8 2.5.9-5.4L4.2 10.1l5.4-.8z"/>',
+    cloud: '<path d="M7.2 18h9.3a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6-1.2A3.9 3.9 0 0 0 7.2 18z"/>',
+    note: '<path d="M6 3.8h9l3 3v13.4H6z"/><path d="M9 8.6h6M9 12h6M9 15.4h4"/>',
+    code: '<path d="M9 8.2l-3.4 3.8L9 15.8M15 8.2l3.4 3.8L15 15.8"/>',
+    book: '<path d="M4.2 5.6A1.6 1.6 0 0 1 5.8 4H10v16H5.8a1.6 1.6 0 0 1-1.6-1.6z"/><path d="M10 4h4.2a1.6 1.6 0 0 1 1.6 1.6v12.8a1.6 1.6 0 0 1-1.6 1.6H10"/>'
+  };
+  const addonIcon = k => ADDON_ICONS[k] || ADDON_ICONS.puzzle;
+  const addonList = () => (S.state && Array.isArray(S.state.addons)) ? S.state.addons : [];
+
+  function addonSlug(name) {
+    const s = String(name || '').toLowerCase()
+      .replace(/[^\w\u4e00-\u9fa5-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+    return (s || 'ext') + '-' + Date.now().toString(36).slice(-4);
+  }
+
+  /** 把粘贴/文件读到的文本解析成扩展对象；格式不对就抛错误给用户看 */
+  function parseAddon(raw, filename) {
+    const txt = String(raw || '').trim();
+    if (!txt) throw new Error('内容是空的');
+    let o;
+    if (txt[0] === '{') {
+      try { o = JSON.parse(txt); } catch (e) { throw new Error('JSON 格式不对：' + (e.message || e)); }
+    } else if (txt[0] === '[') {
+      throw new Error('一次只能导入一个扩展，请把数组拆成单个对象');
+    } else {
+      /* 直接丢一个 .html 进来：整个文件当面板，名字取 <title> 或文件名 */
+      const t = (txt.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1];
+      const nm = (t || String(filename || '').replace(/\.[^.]+$/, '') || '未命名扩展').trim();
+      o = { name: nm, type: 'html', html: txt };
+    }
+    const name = String(o.name || '').trim();
+    if (!name) throw new Error('缺少 name（扩展名称）');
+    const url = String(o.url || '').trim();
+    const html = String(o.html || '');
+    const type = url && !html.trim() ? 'link' : 'html';
+    if (type === 'html' && !html.trim()) throw new Error('缺少 html（面板内容），或改成填 url（站点地址）');
+    if (type === 'link' && !/^https?:\/\//i.test(url)) throw new Error('url 必须以 http:// 或 https:// 开头');
+    if (html.length > 400 * 1024) throw new Error('面板超过 400KB，建议精简一下或改用 url 方式');
+    return {
+      id: String(o.id || '').trim().replace(/[^\w.:-]/g, '') || addonSlug(name),
+      name: name.slice(0, 40),
+      desc: (String(o.desc || '').trim() || (type === 'link' ? url.replace(/^https?:\/\//i, '') : '自定义扩展')).slice(0, 80),
+      version: String(o.version || '1.0.0').slice(0, 16),
+      author: String(o.author || '').slice(0, 40),
+      icon: ADDON_ICONS[o.icon] ? o.icon : 'puzzle',
+      type, html, url,
+      enabled: o.enabled !== false,
+      at: Date.now()
+    };
+  }
+
+  const ADDON_DEMO = {
+    name: '阅读小助手',
+    desc: '示例：显示当前在读的书',
+    version: '1.0.0',
+    author: '墨读',
+    icon: 'star',
+    type: 'html',
+    html: `<div style="font:14px/1.7 system-ui;padding:20px;color:#1a1e26">
+  <h3 style="margin:0 0 10px">阅读小助手</h3>
+  <p id="ctx" style="color:#6b7280">正在读取当前状态…</p>
+  <button id="go" style="margin-top:8px;padding:7px 14px;border:0;border-radius:8px;background:#2b6ce0;color:#fff">回到书架</button>
+  <script>
+    parent.postMessage({ moread:'context' }, '*');
+    addEventListener('message', e => {
+      const d = e.data || {};
+      if (d.moread !== 'context') return;
+      const b = d.data && d.data.book;
+      document.getElementById('ctx').textContent = b
+        ? '在读：' + b.name + '（' + (d.data.chapterTitle || '第 ' + (b.chapter + 1) + ' 章') + '）'
+        : '还没打开书，去书架挑一本吧。';
+    });
+    document.getElementById('go').onclick = () => parent.postMessage({ moread:'shelf' }, '*');
+  <\/script>
+</div>`
+  };
+
+  function addonCard(a) {
+    return `<button class="ext-card" data-ext="addon:${esc(a.id)}">
+      <span class="ext-ico">${a.type === 'link' ? '<svg viewBox="0 0 24 24"><path d="M10 13.6a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.3 1.3"/><path d="M14 10.4a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 0 0 5.7 5.7l1.3-1.3"/></svg>' : `<svg viewBox="0 0 24 24">${addonIcon(a.icon)}</svg>`}</span>
+      <span class="ext-info"><b>${esc(a.name)}</b><i>${esc(a.desc)}</i></span>
+      <span class="ext-stat">v${esc(a.version)}${a.author ? ' · ' + esc(a.author) : ''}</span>
+    </button>`;
+  }
+
+  const extTitle = () => {
+    if (!S.ext) return '扩展';
+    if (S.ext.indexOf('addon:') === 0) {
+      const a = addonList().find(x => x.id === S.ext.slice(6));
+      return a ? a.name : '扩展';
+    }
+    return EXT_NAME[S.ext] || '扩展';
+  };
 
   function renderExt() {
     const v = $('#view-ext');
     if (!v) return;
     if (!S.ext) {
       v.innerHTML = `
-        <div class="page-head"><h1>扩展</h1><span class="sub">书源、历史、统计都在这里，以后的新功能也往这儿加</span></div>
+        <div class="page-head"><h1>扩展</h1></div>
         <div class="ext-grid">
           ${EXT.map(e => `<button class="ext-card" data-ext="${e.k}">
             <span class="ext-ico"><svg viewBox="0 0 24 24">${e.icon}</svg></span>
             <span class="ext-info"><b>${e.name}</b><i>${e.desc}</i></span>
             <span class="ext-stat">${esc(e.stat())}</span>
           </button>`).join('')}
+          ${addonList().map(addonCard).join('')}
+          <button class="ext-card addon-add" data-ext="addon">
+            <span class="ext-ico"><svg viewBox="0 0 24 24">${ADDON_ICONS.plus}</svg></span>
+            <span class="ext-info"><b>添加扩展</b><i>导入开发者做的功能面板 · 附教程</i></span>
+            <span class="ext-stat">JSON / HTML</span>
+          </button>
         </div>`;
       $$('#view-ext [data-ext]').forEach(b => b.onclick = () => {
         S.ext = b.dataset.ext;
         const t = $('#tb-title');
-        if (t) t.textContent = EXT_NAME[S.ext] || '扩展';
+        if (t) t.textContent = extTitle();
         renderExt();
       });
       return;
@@ -479,10 +593,247 @@
     if (S.ext === 'sources') renderSources(host);
     else if (S.ext === 'history') renderHistory(host);
     else if (S.ext === 'stats') renderStats(host);
+    else if (S.ext === 'addon') renderAddonManager(host);
+    else if (S.ext.indexOf('addon:') === 0) renderAddonPanel(host, S.ext.slice(6));
     /* 返回按钮插进子页自己的 .page-head，跟着吸顶一起走 */
     const head = host.querySelector('.page-head');
     if (head) head.insertBefore(back, head.firstChild); else host.insertBefore(back, host.firstChild);
   }
+
+  /* ---------------- 添加扩展：导入 · 教程 · 管理 ---------------- */
+  const ADDON_EXT_RE = /\.(json|html?|txt)$/i;
+
+  /** 解析 + 落库（同名同 id 会问一下覆盖）。成功返回扩展对象，失败返回 null。 */
+  async function importAddon(raw, fname) {
+    let a;
+    try { a = parseAddon(raw, fname); } catch (e) { toast(e.message || String(e), 4000); return null; }
+    const arr = addonList();
+    const dup = arr.find(x => x.id === a.id || x.name === a.name);
+    if (dup) {
+      const ok = await confirmAsk({
+        title: '覆盖扩展',
+        text: `已经有「${esc(dup.name)}」了，用这次导入的内容覆盖它？`,
+        ok: '覆盖'
+      });
+      if (!ok) return null;
+      Object.assign(dup, a, { id: dup.id, at: Date.now() });
+    } else {
+      arr.push(a);
+    }
+    S.state.addons = arr;
+    save(true);
+    return a;
+  }
+
+  async function importAddonFile(file) {
+    if (!file) return;
+    let txt = '';
+    try { txt = await file.text(); } catch (e) { toast('读文件失败：' + (e.message || e)); return; }
+    const a = await importAddon(txt, file.name);
+    if (a) { toast(`已导入「${a.name}」`); renderExt(); }
+  }
+
+  function renderAddonManager(host) {
+    const list = addonList();
+    host.innerHTML = `
+      <div class="page-head"><h1>添加扩展</h1>
+        <span class="sub">${list.length ? `已安装 ${list.length} 个` : '还没有导入过扩展'}</span></div>
+      <div class="set-wrap one">
+        <div class="card">
+          <h3>导入扩展</h3>
+          <div class="addon-drop" id="addon-drop">
+            <b>把 .json / .html 拖进窗口</b>
+            <span>也可以粘贴到下面，或点「选文件」</span>
+          </div>
+          <textarea class="addon-text" id="addon-text" spellcheck="false"
+            placeholder='{"name":"我的扩展","desc":"一句话说明","html":"<div>你好，墨读</div>"}'></textarea>
+          <div class="addon-acts">
+            <button class="btn primary" id="addon-import">导入</button>
+            <button class="btn" id="addon-file">选文件…</button>
+            <button class="btn ghost" id="addon-demo">填入示例</button>
+            <input type="file" id="addon-input" accept=".json,.html,.htm,.txt,application/json,text/html" hidden />
+          </div>
+          <p class="addon-tip">两种扩展：<b>HTML 面板</b>（自带界面，最常用）或 <b>站点入口</b>（填一个网址，浏览器里打开）。导入后扩展菜单里就会多一张卡。</p>
+        </div>
+
+        <div class="card">
+          <h3>教程 · 三步做一个扩展</h3>
+          <ol class="addon-steps">
+            <li><b>写面板</b>：新建一个 <code>.html</code>，正常写 HTML / CSS / JS，不用管墨读的样式。</li>
+            <li><b>写清单</b>：把面板内容放进 <code>html</code> 字段（整段 HTML 转义成字符串），或者只填 <code>url</code> 做成站点入口。</li>
+            <li><b>导入</b>：把 JSON 拖进窗口、或粘贴到上面，成功后扩展菜单多一张卡，点开就是面板。</li>
+          </ol>
+          <pre class="addon-code">{
+  "name": "阅读小助手",
+  "desc": "显示当前在读的书",
+  "version": "1.0.0",
+  "author": "你的名字",
+  "icon": "star",
+  "html": "&lt;div&gt;你好，墨读&lt;/div&gt;"
+}</pre>
+          <p class="addon-tip">必填只有 <code>name</code> 和 <code>html</code>（或 <code>url</code>）。<code>icon</code> 可选 puzzle / star / timer / cloud / note / code / book。</p>
+        </div>
+
+        <div class="card">
+          <h3>面板怎么跟墨读说话</h3>
+          <pre class="addon-code">// 面板（iframe）里执行
+parent.postMessage({ moread:'toast', text:'你好' }, '*');
+parent.postMessage({ moread:'context' }, '*');      // 取当前在读
+parent.postMessage({ moread:'search', q:'三体' }, '*');
+parent.postMessage({ moread:'openBook', id:'…', chapter:0 }, '*');
+parent.postMessage({ moread:'shelf' }, '*');       // 回书架
+
+// 听宿主回复
+addEventListener('message', e => {
+  if (e.data &amp;&amp; e.data.moread === 'context') {
+    console.log(e.data.data);   // { book, chapterTitle, theme, fontSize }
+  }
+});</pre>
+          <p class="addon-tip">面板跑在沙箱里，读不到书库和存档；需要什么就问宿主。分发给别人只要给这一个 JSON 文件，对方导入即用。</p>
+        </div>
+
+        <div class="card">
+          <h3>已安装<span class="chip">${list.length} 个</span></h3>
+          ${list.length ? list.map(a => `
+            <div class="addon-row">
+              <span class="addon-row-ico"><svg viewBox="0 0 24 24">${addonIcon(a.icon)}</svg></span>
+              <span class="rl"><b>${esc(a.name)}</b>
+                <i>${esc(a.desc)} · v${esc(a.version)}${a.author ? ' · ' + esc(a.author) : ''}</i></span>
+              <button class="btn sm" data-addon-open="${esc(a.id)}">打开</button>
+              <button class="btn sm danger" data-addon-del="${esc(a.id)}">移除</button>
+            </div>`).join('') : `<div class="empty">还没有扩展，拖个 JSON 进来试试。</div>`}
+        </div>
+      </div>`;
+
+    const ta = $('#addon-text');
+    const doImport = async (raw, fname) => {
+      const a = await importAddon(raw, fname);
+      if (a) { toast(`已导入「${a.name}」`); renderExt(); }
+      return !!a;
+    };
+
+    $('#addon-import').onclick = () => {
+      const txt = (ta && ta.value || '').trim();
+      if (!txt) { toast('先粘贴扩展内容，或点「选文件」'); return; }
+      doImport(txt, '');
+    };
+    $('#addon-demo').onclick = () => {
+      if (ta) { ta.value = JSON.stringify(ADDON_DEMO, null, 2); ta.focus(); }
+      toast('这是一份能直接导入的示例');
+    };
+    $('#addon-input').onchange = async e => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      try { await doImport(await f.text(), f.name); } catch (err) { toast('读文件失败：' + (err.message || err)); }
+      e.target.value = '';
+    };
+    $('#addon-file').onclick = () => $('#addon-input').click();
+
+    /* 拖到这张卡片上也认：拖拽事件被全局接走时只改文案，见 bindDropZone */
+    const drop = $('#addon-drop');
+    drop.onclick = () => {
+      const inp = $('#addon-input');
+      if (inp) inp.click();
+    };
+
+    $$('[data-addon-open]').forEach(b => b.onclick = () => {
+      S.ext = 'addon:' + b.dataset.addonOpen;
+      const t = $('#tb-title');
+      if (t) t.textContent = extTitle();
+      renderExt();
+    });
+    $$('[data-addon-del]').forEach(b => b.onclick = async () => {
+      const a = addonList().find(x => x.id === b.dataset.addonDel);
+      if (!a) return;
+      const ok = await confirmAsk({
+        title: '移除扩展', text: `把「${esc(a.name)}」从扩展菜单里删掉？`, ok: '移除', danger: true
+      });
+      if (!ok) return;
+      S.state.addons = addonList().filter(x => x.id !== a.id);
+      save(true);
+      toast('已移除');
+      renderExt();
+    });
+  }
+
+  function renderAddonPanel(host, id) {
+    const a = addonList().find(x => x.id === id);
+    if (!a) {
+      host.innerHTML = `<div class="page-head"><h1>扩展</h1></div>
+        <div class="empty">这个扩展已经不在了。</div>`;
+      return;
+    }
+    const linkMode = a.type === 'link';
+    host.innerHTML = `
+      <div class="page-head addon-head"><h1>${esc(a.name)}</h1>
+        <span class="sub">${esc(a.desc)}</span>
+        <div class="head-tools">
+          ${linkMode ? '<button class="btn sm" id="addon-visit">在浏览器打开</button>' : ''}
+          <button class="btn sm ghost" id="addon-manage">管理</button>
+        </div>
+      </div>
+      ${linkMode ? `
+        <div class="addon-link">
+          <span class="ext-ico"><svg viewBox="0 0 24 24"><path d="M10 13.6a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.3 1.3"/><path d="M14 10.4a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 0 0 5.7 5.7l1.3-1.3"/></svg></span>
+          <b>${esc(a.name)}</b>
+          <i>${esc(a.url)}</i>
+          <button class="btn primary" id="addon-visit2">打开站点</button>
+        </div>` : `
+        <div class="addon-panel">
+          <iframe id="addon-frame" title="${esc(a.name)}" sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+            srcdoc="${esc(a.html)}"></iframe>
+        </div>`}
+    `;
+    const open = () => {
+      try {
+        if (mo.openExternal) mo.openExternal(a.url);
+        else window.open(a.url, '_blank', 'noopener');
+      } catch (e) {
+        try { window.open(a.url, '_blank', 'noopener'); } catch (_) { toast('打不开这个地址'); }
+      }
+    };
+    ['#addon-visit', '#addon-visit2'].forEach(s => { const b = $(s); if (b) b.onclick = open; });
+    const mg = $('#addon-manage');
+    if (mg) mg.onclick = () => {
+      S.ext = 'addon';
+      const t = $('#tb-title');
+      if (t) t.textContent = EXT_NAME.addon;
+      renderExt();
+    };
+  }
+
+  /* 扩展面板 ↔ 宿主的唯一通道。只认这几条，别的一律忽略。 */
+  window.addEventListener('message', e => {
+    const d = e.data;
+    if (!d || typeof d !== 'object' || !d.moread) return;
+    const reply = obj => { try { e.source && e.source.postMessage(obj, '*'); } catch (_) { } };
+    if (d.moread === 'toast') { toast(String(d.text || '').slice(0, 200), 2600); return; }
+    if (d.moread === 'shelf') { setView('shelf'); return; }
+    if (d.moread === 'context') {
+      const b = R && R.book;
+      reply({
+        moread: 'context',
+        data: {
+          book: b ? { id: b.id, name: b.name, author: b.author || '', chapter: R.ci || 0 } : null,
+          chapterTitle: (R && R.title) || '',
+          theme: (S.state.settings || {}).theme || 'paper',
+          fontSize: (S.state.settings || {}).fontSize || 19,
+          count: (S.state.books || []).length
+        }
+      });
+      return;
+    }
+    if (d.moread === 'search') {
+      setView('search');
+      const kw = String(d.q || '').trim();
+      const inp = $('#search-input') || $('#quick-search');
+      if (kw && inp) { inp.value = kw; try { runSearch(kw); } catch (_) { } }
+      return;
+    }
+    if (d.moread === 'openBook' && d.id) {
+      try { openReader(String(d.id), parseInt(d.chapter, 10) || 0); } catch (_) { }
+    }
+  });
 
   /** 切换搜索方式：书源 / 网页。两边共用同一个输入框和结果区。 */
   function setSearchMode(mode) {
@@ -504,6 +855,8 @@
   }
 
   function setView(v) {
+    /* 已经停在某个扩展子页 / 面板里，再点侧栏「扩展」先回菜单，跟返回键一致 */
+    if (v === 'ext' && S.view === 'ext' && S.ext) S.ext = null;
     /* 书源 / 历史 / 统计已经收进扩展：老名字继续认，外部调用点（空书架引导、
        搜索无结果的提示、快捷键）不用跟着改 */
     if (v === 'sources' || v === 'history' || v === 'stats') { S.ext = v; v = 'ext'; }
@@ -513,7 +866,8 @@
     $$('.rail-btn').forEach(b => b.classList.toggle('active', b.dataset.view === v));
     $$('.view').forEach(el => el.classList.toggle('active', el.id === 'view-' + v));
     const names = {
-      shelf: '书架', search: '搜索', ext: S.ext ? EXT_NAME[S.ext] : '扩展', settings: '设置'
+      shelf: '书架', search: '搜索', ext: extTitle(),
+      settings: S.set ? setSecName() : '设置'
     };
     $('#tb-title').textContent = names[v] || '';
     if (v === 'shelf') renderShelf();
@@ -576,13 +930,24 @@
   function bindDropZone() {
     const dz = $('#dropzone');
     if (!dz) return;                 // 安卓版摘掉了拖放区
+    /* 在「扩展 → 添加扩展」页时，拖进来的是扩展清单而不是书：文案与去向都要换 */
+    const addonMode = () => S.view === 'ext' && S.ext === 'addon';
     let depth = 0;
-    window.addEventListener('dragenter', e => { e.preventDefault(); depth++; dz.classList.add('on'); });
+    window.addEventListener('dragenter', e => {
+      e.preventDefault(); depth++;
+      const label = dz.firstElementChild;
+      if (label) label.textContent = addonMode() ? '松开以导入扩展（JSON / HTML）' : '松开以导入本地书籍';
+      dz.classList.add('on');
+    });
     window.addEventListener('dragover', e => e.preventDefault());
     window.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; dz.classList.remove('on'); } });
     window.addEventListener('drop', async e => {
       e.preventDefault(); depth = 0; dz.classList.remove('on');
       const list = [...(e.dataTransfer.files || [])];
+      if (addonMode() && list.length && ADDON_EXT_RE.test(list[0].name)) {
+        importAddonFile(list[0]);
+        return;
+      }
       const files = list.map(f => f.path).filter(Boolean);   // Electron：File 带真实路径
       if (files.length) { doImport(files); return; }
       /* 浏览器里 File 没有 path：交给网页桥读进虚拟文件系统再导入 */
@@ -2687,13 +3052,66 @@
       </div>`;
   }
 
-  /* ---------------- 设置 ---------------- */
+  /* ---------------- 设置 ----------------
+   * 设置项越加越多（阅读、朗读、书架、搜索、备份、同步、关于），以前一页铺到底，
+   * 手机上要往下划十几屏才找得到「关于」。现在和「扩展」一样做两级：进设置先看
+   * 一屏模块卡片（右边挂当前状态），点进去只看那一组开关。
+   * 卡片仍然一次性渲染、事件一次性绑好，子页只是把别的卡片 hidden 掉，
+   * 所以来回切不会丢监听，改动也照旧即时生效。 */
+  const SET = [
+    {
+      k: 'read', name: '阅读', desc: '字号 · 行距 · 字体 · 翻页',
+      icon: '<path d="M4 5.6h6.4a2 2 0 0 1 2 2V19a1.9 1.9 0 0 0-1.9-1.9H4z"/><path d="M20 5.6h-6.4a2 2 0 0 0-2 2V19a1.9 1.9 0 0 1 1.9-1.9H20z"/>',
+      stat: () => { const s = S.state.settings; return `${s.fontSize}px · ${s.lineHeight.toFixed(1)} 行距`; }
+    },
+    {
+      k: 'tts', name: '朗读', desc: '音色 · 语速 · 自动下一章',
+      icon: '<path d="M4 9.6h3l4.4-3.5v11.8L7 14.4H4z"/><path d="M16 8.7a4.7 4.7 0 0 1 0 6.6"/><path d="M18.6 6.1a8.2 8.2 0 0 1 0 11.8"/>',
+      stat: () => S.state.settings.tts.autoNext ? '自动下一章' : '读完停下'
+    },
+    {
+      k: 'shelf', name: '书架', desc: '排序方式 · 封面大小',
+      icon: '<path d="M4 19h16"/><path d="M6.4 19V7.6a1.6 1.6 0 0 1 1.6-1.6h.5a1.6 1.6 0 0 1 1.6 1.6V19"/><path d="M10.6 19V6.8l3.8-1.2V19"/><path d="M14.4 19V8.6l3.9-1.2V19"/>',
+      stat: () => (SHELF_SORTS.find(o => o.k === shelfSortKey()) || SHELF_SORTS[0]).name
+    },
+    {
+      k: 'search', name: '搜索与网络', desc: '并发 · 书源数 · 代理',
+      icon: '<circle cx="11" cy="11" r="6.4"/><path d="M15.8 15.8L20 20"/>',
+      stat: () => `${S.state.settings.maxConcurrent || 2} 并发 · 搜 ${S.state.settings.searchLimit || 40} 源`
+    },
+    {
+      k: 'data', name: '数据与备份', desc: '目录 · 缓存 · 备份恢复',
+      icon: '<ellipse cx="12" cy="6.2" rx="7" ry="2.9"/><path d="M5 6.2v5.8c0 1.6 3.1 2.9 7 2.9s7-1.3 7-2.9V6.2"/><path d="M5 12v5.8c0 1.6 3.1 2.9 7 2.9s7-1.3 7-2.9V12"/>',
+      stat: () => S.info.platform === 'web' ? '浏览器存储' : (onDeviceStore() ? '设备目录' : '本机目录')
+    },
+    {
+      k: 'dav', name: '云端同步', desc: '坚果云 / WebDAV 备份',
+      icon: '<path d="M7.4 18a4 4 0 0 1-.5-7.96A5 5 0 0 1 16.7 8.6 3.7 3.7 0 0 1 17 18z"/>',
+      stat: () => {
+        const w = S.state.settings.webdav;
+        if (!(w.url && w.user && w.pass)) return '未配置';
+        return w.enabled ? (w.lastBackupAt ? '上次 ' + fmtWhen(w.lastBackupAt) : '已配置') : '已配置 · 未启用';
+      }
+    },
+    {
+      k: 'system', name: '系统', desc: IS_ANDROID ? '触屏手势 · 窗口行为' : '窗口行为 · 快捷键',
+      icon: '<path d="M4 7.2h9M17.6 7.2H20M4 16.8h3.4M11.8 16.8H20"/><circle cx="15.2" cy="7.2" r="2.1"/><circle cx="9.4" cy="16.8" r="2.1"/>',
+      stat: () => IS_ANDROID ? '触屏操作' : (S.state.settings.closeToTray ? '× 收进托盘' : '× 直接退出')
+    },
+    {
+      k: 'about', name: '关于', desc: '版本 · 开源地址 · 联系作者',
+      icon: '<circle cx="12" cy="12" r="8.2"/><path d="M12 11.2V17M12 7.6h.01"/>',
+      stat: () => 'v' + S.info.version
+    }
+  ];
+  const setSecName = () => (SET.find(e => e.k === S.set) || {}).name || '设置';
+
   function renderSettings() {
     const v = $('#view-settings');
     const s = S.state.settings;
     v.innerHTML = `<div class="page-head"><h1>设置</h1><span class="sub">改动即时生效</span></div>
       <div class="set-wrap">
-        <div class="card">
+        <div class="card" data-sec="read">
           <h3>阅读</h3>
           <div class="row"><div class="rl">默认字号</div>
             <input type="range" id="s-fs" min="15" max="30" value="${s.fontSize}" /><span class="rv" id="s-fs-v">${s.fontSize}px</span></div>
@@ -2707,9 +3125,11 @@
           <div class="row"><div class="rl">翻页方式</div>
             <div class="seg" id="s-mode"><button data-v="scroll" class="${s.pageMode === 'scroll' ? 'on' : ''}">滚动</button>
             <button data-v="paged" class="${s.pageMode === 'paged' ? 'on' : ''}">翻页</button></div></div>
+          <div class="row"><div class="rl">阅读时自动预取下一章<small>翻到章尾直接接上，弱网时少等一会儿</small></div>
+            <div class="switch ${s.autoCacheNext ? 'on' : ''}" data-set="autoCacheNext"><i></i></div></div>
         </div>
 
-        <div class="card">
+        <div class="card" data-sec="tts">
           <h3>朗读 <span class="chip">${IS_ANDROID ? '系统语音' : OS_NAME() + ' 系统语音'}</span></h3>
           <div class="row"><div class="rl">音色 / 语速 / 音调<small id="tts-cur">${esc(ttsCurrentLabel())}</small></div>
             <button class="btn sm" id="s-tts">设置</button></div>
@@ -2719,29 +3139,35 @@
             <button class="btn sm" id="s-tts-test">播放</button></div>
         </div>
 
-        <div class="card">
-          <h3>系统</h3>
-          ${IS_ANDROID ? '' : `<div class="row"><div class="rl">关闭窗口时最小化到托盘<small>开启后点 × 不会退出程序</small></div>
-            <div class="switch ${s.closeToTray ? 'on' : ''}" data-set="closeToTray"><i></i></div></div>`}
-          <div class="row"><div class="rl">搜索并发数<small>同时请求的书源数量，过大容易被限流</small></div>
-            <div class="seg" id="s-conc">${[1, 2, 3, 4, 6].map(n => `<button data-v="${n}" class="${s.maxConcurrent === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
-          <div class="row"><div class="rl">每次搜索的书源数<small>书源太多（比如几千个）时只搜一部分，优先书架用到的</small></div>
-            <div class="seg" id="s-slimit">${[20, 40, 80, 200].map(n => `<button data-v="${n}" class="${(s.searchLimit || 40) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
-          <div class="row"><div class="rl">阅读时自动预取下一章</div>
-            <div class="switch ${s.autoCacheNext ? 'on' : ''}" data-set="autoCacheNext"><i></i></div></div>
+        <div class="card" data-sec="shelf">
+          <h3>书架</h3>
           <div class="row"><div class="rl">书架排序<small>也可以直接在书架右上角切换</small></div>
             <select class="w-engine" id="s-shelf-sort">${SHELF_SORTS.map(o => `<option value="${o.k}" ${shelfSortKey() === o.k ? 'selected' : ''}>${o.name}</option>`).join('')}</select></div>
           <div class="row"><div class="rl">封面大小<small>书架上一本书占多大</small></div>
             <div class="seg" id="s-shelf-size">${SHELF_SIZES.map(o => `<button data-v="${o.k}" class="${shelfSizeKey() === o.k ? 'on' : ''}">${o.name}</button>`).join('')}</div></div>
+        </div>
+
+        <div class="card" data-sec="search">
+          <h3>搜索与网络</h3>
+          <div class="row"><div class="rl">搜索并发数<small>同时请求的书源数量，过大容易被限流</small></div>
+            <div class="seg" id="s-conc">${[1, 2, 3, 4, 6].map(n => `<button data-v="${n}" class="${s.maxConcurrent === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
+          <div class="row"><div class="rl">每次搜索的书源数<small>书源太多（比如几千个）时只搜一部分，优先书架用到的</small></div>
+            <div class="seg" id="s-slimit">${[20, 40, 80, 200].map(n => `<button data-v="${n}" class="${(s.searchLimit || 40) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
           <div class="row"><div class="rl">换源时搜索的书源数<small>越多越容易找到同名书，但更慢；书源上千时会自动提高到 48</small></div>
             <div class="seg" id="s-swlimit">${[24, 48, 96].map(n => `<button data-v="${n}" class="${([24, 48, 96].includes(s.switchLimit) ? s.switchLimit : 24) === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
-          <div class="row"><div class="rl">数据目录<small>${esc(onDeviceStore() ? (S.info.dataRoot || S.info.paths.root) : S.info.paths.root)}</small></div>
-            ${IS_ANDROID ? '' : '<button class="link" id="open-dir">打开</button>'}</div>
           ${S.info.platform === 'web' ? `<div class="row"><div class="rl">书源代理地址<small>网页版默认不发起任何网络请求（数据不出设备）。填入你自部署的代理服务后可用在线书源与搜书；留空只能读本地书</small></div>
             <input class="inp" id="web-proxy" value="${esc((() => { try { const v = localStorage.getItem('moread.proxy'); if (v) return v; const m = document.querySelector('meta[name="moread-proxy"]'); return m && m.content ? new URL(m.content, location.href).href : ''; } catch (e) { return ''; } })())}" placeholder="https://你的代理地址/?url=" spellcheck="false" /></div>` : ''}
         </div>
 
-        <div class="card">
+        <div class="card" data-sec="data">
+          <h3>数据与缓存</h3>
+          <div class="row"><div class="rl">数据目录<small>${esc(onDeviceStore() ? (S.info.dataRoot || S.info.paths.root) : S.info.paths.root)}</small></div>
+            ${IS_ANDROID ? '' : '<button class="link" id="open-dir">打开</button>'}</div>
+          <div class="row"><div class="rl">缓存占用<small id="cache-size">计算中…</small></div>
+            <button class="btn sm" id="clear-cache">清理</button></div>
+        </div>
+
+        <div class="card" data-sec="data">
           <h3>备份与恢复 <span class="chip">含 Legado 格式</span></h3>
           ${S.info.platform === 'web' ? `<div class="web-note">${onDeviceStore()
             ? '书、书源、阅读进度都保存在这台机器上（' + esc(S.info.dataRoot || '服务器') + '），'
@@ -2754,11 +3180,9 @@
             <button class="btn sm" id="bk-zip-full">完整导出</button></div>
           <div class="row"><div class="rl">从备份恢复<small>墨读 zip、原版「阅读」备份 zip、或手机导出的备份 JSON（含 bookSource / bookshelf 都行，文件名不限）；书架、书源、书签一起恢复</small></div>
             <button class="btn sm" id="bk-restore">选择文件</button></div>
-          <div class="row"><div class="rl">缓存占用<small id="cache-size">计算中…</small></div>
-            <button class="btn sm" id="clear-cache">清理</button></div>
         </div>
 
-        <div class="card span2">
+        <div class="card" data-sec="dav">
           <h3>坚果云同步 <span class="chip ${(s.webdav.url && s.webdav.user && s.webdav.pass) ? 'ok' : ''}" id="dav-state">${(s.webdav.url && s.webdav.user && s.webdav.pass) ? '已配置' : '未配置'}</span></h3>
           <div class="row"><div class="rl">启用 WebDAV 同步<small>坚果云 / Nextcloud / 群晖 等标准 WebDAV 都能用</small></div>
             <div class="switch ${s.webdav.enabled ? 'on' : ''}" id="dav-enabled"><i></i></div></div>
@@ -2791,13 +3215,15 @@
           <div class="dav-list" id="dav-list"><div class="hint">点「刷新」读取云端列表</div></div>
         </div>
 
-        <div class="card">
+        <div class="card" data-sec="system">
           ${IS_ANDROID ? `<h3>触屏操作</h3>
           <div class="row"><div class="rl">进入书籍<small>全屏沉浸：顶栏底栏自动藏起，点屏幕中间唤出，几秒不碰自动再收</small></div></div>
           <div class="row"><div class="rl">轻点屏幕左右两侧<small>上一页 / 下一页，只在「翻页」模式下生效</small></div></div>
           <div class="row"><div class="rl">左右滑动<small>翻页；「滚动」模式下滑动即正常滚动正文</small></div></div>
           <div class="row"><div class="rl">长按书架封面<small>弹出「换源 / 删除」菜单</small></div></div>
-          <div class="row"><div class="rl">长按顶栏 1.2 秒<small>打开自检：桥、存储、联网、WebView 版本逐项列出</small></div></div>` : `<h3>快捷键</h3>
+          <div class="row"><div class="rl">长按顶栏 1.2 秒<small>打开自检：桥、存储、联网、WebView 版本逐项列出</small></div></div>` : `<h3>窗口与快捷键</h3>
+          <div class="row"><div class="rl">关闭窗口时最小化到托盘<small>开启后点 × 不会退出程序</small></div>
+            <div class="switch ${s.closeToTray ? 'on' : ''}" data-set="closeToTray"><i></i></div></div>
           <div class="row"><div class="rl">打开搜索</div><span><span class="kbd">Ctrl</span> + <span class="kbd">F</span></span></div>
           <div class="row"><div class="rl">导入本地书</div><span><span class="kbd">Ctrl</span> + <span class="kbd">O</span></span></div>
           <div class="row"><div class="rl">上一章 / 下一章</div><span><span class="kbd">←</span> <span class="kbd">→</span></span></div>
@@ -2807,7 +3233,7 @@
           <div class="row"><div class="rl">退出阅读</div><span class="kbd">Esc</span></div>`}
         </div>
 
-        <div class="card" style="grid-column:1/-1">
+        <div class="card" data-sec="about">
           <h3>关于</h3>
           <div class="row"><div class="rl">关于墨读<small>版本信息 · 开源地址 · 公众号 · 抖音</small></div>
             <button class="btn sm" id="open-about">查看</button></div>
@@ -2819,6 +3245,48 @@
           <div class="row"><div class="rl">备份格式<small>导出的 zip 内同时含 bookSource.json / bookshelf.json 等原版字段，原版「阅读」可直接导入</small></div></div>
         </div>
       </div>`;
+
+    /* ---- 一级：模块菜单 ---- */
+    if (!S.set) {
+      const wrap = v.querySelector('.set-wrap');
+      if (wrap) wrap.style.display = 'none';
+      const grid = document.createElement('div');
+      grid.className = 'ext-grid set-menu';
+      grid.innerHTML = SET.map(e => `<button class="ext-card" data-sec-go="${e.k}">
+          <span class="ext-ico"><svg viewBox="0 0 24 24">${e.icon}</svg></span>
+          <span class="ext-info"><b>${e.name}</b><i>${e.desc}</i></span>
+          <span class="ext-stat">${esc(e.stat())}</span>
+          <svg class="set-chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+        </button>`).join('');
+      v.appendChild(grid);
+      $$('#view-settings [data-sec-go]').forEach(b => b.onclick = () => {
+        S.set = b.dataset.secGo;
+        const t = $('#tb-title'); if (t) t.textContent = setSecName();
+        renderSettings();
+      });
+      return;
+    }
+
+    /* ---- 二级：只留这一组卡片 ---- */
+    const sec = SET.find(e => e.k === S.set) || SET[0];
+    S.set = sec.k;
+    const wrap = v.querySelector('.set-wrap');
+    if (wrap) wrap.classList.add('one');
+    $$('#view-settings .card').forEach(c => { c.hidden = c.dataset.sec !== sec.k; });
+    const h1 = v.querySelector('.page-head h1');
+    if (h1) h1.textContent = sec.name;
+    const subEl = v.querySelector('.page-head .sub');
+    if (subEl) subEl.textContent = sec.desc;
+    const back = document.createElement('button');
+    back.className = 'ext-back';
+    back.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>设置';
+    back.onclick = () => {
+      S.set = null;
+      const t = $('#tb-title'); if (t) t.textContent = '设置';
+      renderSettings();
+    };
+    const head = v.querySelector('.page-head');
+    if (head) head.insertBefore(back, head.firstChild);
 
     $('#s-fs').oninput = e => {
       s.fontSize = +e.target.value; $('#s-fs-v').textContent = s.fontSize + 'px'; applyReaderStyle(); save();
@@ -2860,7 +3328,7 @@
       $$('#s-swlimit button').forEach(x => x.classList.remove('on'));
       b.classList.add('on'); s.switchLimit = +b.dataset.v; save();
     });
-    $$('[data-set]').forEach(el => el.onclick = () => {
+    $$('#view-settings [data-set]').forEach(el => el.onclick = () => {
       const k = el.dataset.set;
       s[k] = !s[k]; el.classList.toggle('on', s[k]); save(true);
     });
@@ -2875,10 +3343,10 @@
     };
     $('#s-tts').onclick = () => ttsPanel();
     $('#s-tts-test').onclick = () => {
-      const v = ttsOrderedVoices().find(x => x.voiceURI === ttsCfg().voiceURI) || ttsOrderedVoices()[0];
+      const v2 = ttsOrderedVoices().find(x => x.voiceURI === ttsCfg().voiceURI) || ttsOrderedVoices()[0];
       const u = new SpeechSynthesisUtterance('这是墨读的朗读试听，语速和音色可以随时调整。');
-      if (v) u.voice = v;
-      u.lang = (v && v.lang) || 'zh-CN';
+      if (v2) u.voice = v2;
+      u.lang = (v2 && v2.lang) || 'zh-CN';
       u.rate = clamp(Number(ttsCfg().rate) || 1, .5, 2);
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(u);
@@ -2909,9 +3377,10 @@
     $('#dav-refresh').onclick = () => davLoadList();
     $('#dav-up-src').onclick = davUploadSources;
     $('#dav-down-src').onclick = davDownloadSources;
-    if (dav.enabled && dav.user && dav.pass) davLoadList();
+    /* 进了同步页才去读云端列表，别的模块不用为一屏看不到的列表掏网络 */
+    if (sec.k === 'dav' && dav.enabled && dav.user && dav.pass) davLoadList();
 
-    updateCacheSize();
+    if (sec.k === 'data') updateCacheSize();
   }
 
   /* ---------------- 备份 zip / Legado 恢复 ---------------- */
@@ -5173,6 +5642,8 @@
       }
       /* 扩展里的子页（书源 / 历史 / 统计）先退回扩展菜单，再退到书架 */
       if (S.view === 'ext' && S.ext) { S.ext = null; renderExt(); const t = $('#tb-title'); if (t) t.textContent = '扩展'; return true; }
+      /* 设置里的模块页（阅读 / 朗读 / 备份…）先退回设置菜单 */
+      if (S.view === 'settings' && S.set) { S.set = null; renderSettings(); const t = $('#tb-title'); if (t) t.textContent = '设置'; return true; }
       /* 网页搜书里点进某个站之后，返回应当退回搜索结果那一页 */
       if (S.view === 'search' && S.searchMode === 'web' && WA.stack.length) {
         const wb = $('#wa-back');
@@ -5196,6 +5667,8 @@
         if (/\.zip$/i.test(p.name || '')) {
           const r = await mo.testImportZip(p.path);
           if (!r.ok) return toast(r.error || '无法识别这个备份');
+          /* 直接落到「数据与备份」那一页，别让用户在设置菜单里再找一遍 */
+          S.set = 'data';
           setView('settings');
           showRestoreConfirm(r);
         } else if (/\.json$/i.test(p.name || '')) {

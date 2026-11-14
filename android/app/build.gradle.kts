@@ -11,8 +11,8 @@ android {
         applicationId = "cn.moread.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 610
-        versionName = "0.6.10"
+        versionCode = 612
+        versionName = "0.6.12"
     }
 
     buildTypes {
