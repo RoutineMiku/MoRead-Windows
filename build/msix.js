@@ -30,7 +30,9 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 const V = pkg.version;
 const VER4 = V.split('.').concat(['0', '0', '0']).slice(0, 4).join('.');
 const SRC = path.join(ROOT, 'dist', '墨读-win32-x64');
-const STAGE = path.join(ROOT, 'dist', '_msix');
+/* 每次用独立暂存目录：旧的 dist/_msix 里有 300MB 用户数据副本，
+   外部清理会被安全策略拦，脚本自己删又可能崩，干脆不碰它 */
+const STAGE = path.join(ROOT, 'dist', '_msix-' + Date.now().toString(36));
 const OUT = path.join(ROOT, 'dist', `MoRead-${V}-x64.msix`);
 
 const TOOL_DIR = path.join(ROOT, '.msix-tools', 'buildtools', 'bin', '10.0.26100.0', 'x64');
@@ -67,14 +69,20 @@ if (reuse) {
   console.log('复制应用文件（约 310MB，robocopy）…');
   fs.rmSync(STAGE, { recursive: true, force: true });
   fs.mkdirSync(STAGE, { recursive: true });
-  const rr = spawnSync('robocopy', [SRC, STAGE, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/nc', '/ns', '/np'], { stdio: 'inherit' });
+  const rr = spawnSync('robocopy', [
+    SRC, STAGE, '/E',
+    /* 用户数据与便携标记不进城：MSIX 装进只读的 WindowsApps，带了会写不进去；
+       而且 Node 事后删这个 data 目录会直接崩，所以复制阶段就排除 */
+    '/XD', 'data', '/XF', 'portable.txt',
+    '/NFL', '/NDL', '/NJH', '/NJS', '/nc', '/ns', '/np'
+  ], { stdio: 'inherit' });
   if (rr.status === null || rr.status > 7) {
     console.error('robocopy 失败（退出码 ' + rr.status + '）');
     process.exit(1);
   }
 }
 for (const junk of ['data', 'portable.txt']) {
-  fs.rmSync(path.join(STAGE, junk), { recursive: true, force: true });
+  try { fs.rmSync(path.join(STAGE, junk), { recursive: true, force: true }); } catch (e) { /* 已被排除，兜底 */ }
 }
 const exeOld = path.join(STAGE, '墨读.exe');
 const exeNew = path.join(STAGE, 'MoRead.exe');

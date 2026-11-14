@@ -20,20 +20,21 @@ web/privacy.html              隐私政策页，随网页版发布到 Pages
 
 ## 二、拿到 Identity，重打一次包
 
-预留名称后，在「产品 → 产品标识」里能看到两行关键信息：
+预留名称后，在「产品 → 产品标识」里能看到两行关键信息（本应用已预留，实际值如下）：
 
 ```
-Package/Identity/Name       例如 12345RoutineMiku.MoRead
-Package/Identity/Publisher  例如 CN=8F3A1B2C-...
-Package/Properties/PublisherDisplayName  例如 RoutineMiku
+Package/Identity/Name        RoutineMiku.2909A98DBE99
+Package/Identity/Publisher   CN=58CA1DED-8AB3-4D0D-AF50-62C9B781AA4D
+PublisherDisplayName         RoutineMiku
+Store ID                     9P0DD6KZC27S
 ```
 
 用它们重打（**Publisher 必须与 Partner Center 给的一字不差**）：
 
 ```bash
 node build/msix.js \
-  --identity "12345RoutineMiku.MoRead" \
-  --publisher "CN=8F3A1B2C-..." \
+  --identity "RoutineMiku.2909A98DBE99" \
+  --publisher "CN=58CA1DED-8AB3-4D0D-AF50-62C9B781AA4D" \
   --publisher-name "RoutineMiku"
 ```
 
