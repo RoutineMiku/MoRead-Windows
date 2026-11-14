@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:900px;height:383px;overflow:hidden;}
+  body{
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif;color:#efe9dd;
+    background:
+      radial-gradient(560px 400px at 92% 4%, rgba(201,70,47,.26), transparent 62%),
+      radial-gradient(520px 420px at 4% 104%, rgba(72,102,168,.22), transparent 62%),
+      linear-gradient(150deg,#161a23,#0c0e13 62%,#151a24);
+    padding:44px 52px;display:flex;align-items:center;justify-content:space-between;gap:32px;
+    position:relative;
+  }
+  body::after{
+    content:"";position:absolute;right:-140px;bottom:-180px;width:520px;height:520px;border-radius:50%;
+    border:1px solid rgba(239,233,221,.10);box-shadow:0 0 0 60px rgba(239,233,221,.02),0 0 0 160px rgba(239,233,221,.014);
+  }
+  .l{position:relative;z-index:2;}
+  .tag{font-size:17px;letter-spacing:4px;color:#c9462f;margin-bottom:16px;display:flex;align-items:center;gap:12px;}
+  .tag i{width:34px;height:2px;background:#c9462f;display:block;}
+  h1{font-family:"Songti SC","SimSun",serif;font-size:52px;line-height:1.26;font-weight:700;}
+  h1 em{font-style:normal;color:#c9462f;}
+  .sub{margin-top:16px;font-size:19px;color:#98a0ae;letter-spacing:1px;}
+  .r{position:relative;z-index:2;text-align:center;flex:0 0 auto;}
+  .r img{width:150px;height:150px;border-radius:36px;box-shadow:0 24px 60px -22px #000;}
+  .r b{display:block;margin-top:14px;font-size:20px;letter-spacing:7px;color:#cfd5df;font-weight:400;}
+</style>
+</head>
+<body>
+  <div class="l">
+    <div class="tag"><i></i>墨读 · 更新全记录</div>
+    <h1>十二个版本<br />从一屏 <em>17</em> 行到<em>九个平台</em></h1>
+    <div class="sub">0.6.1 → 0.6.12 · 60+ 项改动 · 开源免费</div>
+  </div>
+  <div class="r"><img src="../ui/logo.png" alt="" /><b>墨读</b></div>
+</body>
+</html>

@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>墨读 0.6.1 → 0.6.12</title>
+<style>
+  :root{
+    --ink:#0e1015;
+    --paper:#efe9dd;
+    --dim:#8d95a3;
+    --red:#c9462f;
+    --line:rgba(239,233,221,.14);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:1080px;height:1920px;overflow:hidden;background:var(--ink);}
+  body{
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif;
+    color:var(--paper);-webkit-font-smoothing:antialiased;
+  }
+  svg, .serif{font-family:"Songti SC","SimSun","Noto Serif SC",serif;}
+
+  .card{
+    position:relative;width:1080px;height:1920px;overflow:hidden;
+    background:
+      radial-gradient(900px 700px at 88% -6%, rgba(201,70,47,.17), transparent 62%),
+      radial-gradient(760px 620px at -8% 104%, rgba(72,102,168,.16), transparent 60%),
+      linear-gradient(168deg,#12151c 0%,#0d0f14 58%,#141821 100%);
+    padding:112px 96px 132px;
+    display:none;flex-direction:column;justify-content:center;
+  }
+  .card.on{display:flex;}
+
+  .card::before{
+    content:"";position:absolute;right:-330px;bottom:-300px;
+    width:1000px;height:1000px;border-radius:50%;
+    border:1px solid rgba(239,233,221,.09);
+    box-shadow:0 0 0 90px rgba(239,233,221,.022), 0 0 0 240px rgba(239,233,221,.015);
+    pointer-events:none;
+  }
+  .card::after{
+    content:"";position:absolute;left:0;top:0;width:100%;height:100%;
+    background:repeating-linear-gradient(180deg,rgba(255,255,255,.020) 0 1px,transparent 1px 6px);
+    opacity:.5;pointer-events:none;
+  }
+  .card > *{position:relative;z-index:2;}
+
+  .top{display:flex;align-items:center;gap:20px;margin-bottom:52px;}
+  .top i{display:block;width:52px;height:2px;background:var(--red);}
+  .top b{
+    font-size:30px;font-weight:600;letter-spacing:3px;color:var(--red);
+    font-family:"Bahnschrift","DIN Alternate","Microsoft YaHei",sans-serif;
+  }
+  .top s{font-size:26px;color:var(--dim);text-decoration:none;letter-spacing:2px;}
+
+  h1{font-size:90px;line-height:1.24;font-weight:700;letter-spacing:1px;}
+  h1 em{font-style:normal;color:var(--red);}
+
+  .lead{margin-top:32px;font-size:33px;line-height:1.72;color:#b9c0cc;}
+  .lead em{font-style:normal;color:var(--paper);}
+
+  .mono{
+    font-family:"Cascadia Mono","Consolas",monospace;
+    color:var(--red);background:rgba(201,70,47,.10);
+    padding:2px 12px;border-radius:6px;font-size:.92em;
+  }
+
+  .mid{margin-top:56px;}
+
+  ul{list-style:none;margin-top:64px;}
+  ul li{
+    display:flex;gap:22px;align-items:flex-start;
+    padding:24px 0;border-top:1px solid var(--line);
+    font-size:31px;line-height:1.6;color:#d7dce5;
+  }
+  ul li:last-child{border-bottom:1px solid var(--line);}
+  ul li .n{
+    flex:0 0 auto;min-width:42px;height:42px;margin-top:7px;border-radius:50%;
+    background:rgba(201,70,47,.16);color:var(--red);
+    font-size:21px;font-weight:700;display:flex;align-items:center;justify-content:center;
+    font-family:"Bahnschrift",sans-serif;
+  }
+  ul li b{color:var(--paper);font-weight:700;}
+  ul li em{font-style:normal;color:var(--red);}
+
+  .big{
+    font-family:"Bahnschrift","DIN Alternate","Microsoft YaHei",sans-serif;
+    font-size:250px;line-height:1;font-weight:700;letter-spacing:-6px;
+    display:flex;align-items:baseline;
+  }
+  .big .unit{font-size:58px;letter-spacing:0;color:#6b7484;margin-left:12px;font-weight:600;}
+  .big .arr{font-size:120px;color:var(--red);margin:0 34px;letter-spacing:0;position:relative;top:-14px;}
+  .big .to{font-size:120px;color:var(--red);margin:0 26px;letter-spacing:0;position:relative;top:-12px;}
+  /* 四个字符以上的数字要单独收一收，不然会顶出右边 */
+  .big.tight{font-size:172px;letter-spacing:-8px;}
+  .big.tight .unit{font-size:42px;margin-left:8px;letter-spacing:0;}
+  .big.tight .arr{font-size:84px;margin:0 22px;letter-spacing:0;}
+
+  /* 三格数据 */
+  .stats3{display:flex;gap:0;}
+  .stats3 div{flex:1;border-left:2px solid rgba(201,70,47,.5);padding-left:24px;}
+  .stats3 b{
+    display:block;font-size:84px;line-height:1.15;letter-spacing:-2px;
+    font-family:"Bahnschrift","DIN Alternate",sans-serif;
+  }
+  .stats3 b em{font-style:normal;color:var(--red);}
+  .stats3 i{font-style:normal;font-size:25px;color:var(--dim);letter-spacing:1px;}
+
+  /* 左右分栏：列表 + 截图 */
+  .row2{display:flex;align-items:center;gap:40px;margin-top:56px;}
+  .row2 ul{flex:1;min-width:0;margin-top:0;}
+  .row2 ul li{font-size:29px;padding:20px 0;}
+  .shot{
+    flex:0 0 286px;border-radius:20px;overflow:hidden;
+    border:1px solid rgba(239,233,221,.20);
+    box-shadow:0 34px 70px -26px #000, 0 0 0 7px rgba(239,233,221,.04);
+  }
+  .shot img{display:block;width:100%;height:470px;object-fit:cover;object-position:top;}
+
+  .logo-wrap{display:flex;align-items:center;gap:44px;}
+  .logo-wrap img{width:300px;height:300px;border-radius:70px;box-shadow:0 40px 90px -34px #000;}
+  .logo-wrap .cap{font-size:29px;line-height:1.78;color:var(--dim);}
+  .logo-wrap .cap b{display:block;color:var(--paper);font-size:35px;margin-bottom:14px;line-height:1.5;}
+
+  .plats{display:flex;flex-wrap:wrap;gap:15px;}
+  .plats span{
+    font-size:29px;padding:15px 25px;border-radius:999px;
+    border:1px solid rgba(239,233,221,.22);color:#cdd3dd;letter-spacing:1px;
+  }
+  .plats span.hot{border-color:rgba(201,70,47,.62);color:#f0b3a7;background:rgba(201,70,47,.10);}
+
+  /* 12 / 716 对比 */
+  .cmp{display:flex;align-items:center;gap:34px;}
+  .cmp div{flex:1;border-left:2px solid rgba(201,70,47,.55);padding-left:26px;}
+  .cmp div b{
+    display:block;font-size:112px;line-height:1.1;
+    font-family:"Bahnschrift","DIN Alternate",sans-serif;letter-spacing:-3px;
+  }
+  .cmp div.gone b{color:#5b6473;text-decoration:line-through;text-decoration-thickness:6px;}
+  .cmp div i{font-style:normal;font-size:24px;color:var(--dim);letter-spacing:1px;white-space:nowrap;}
+  .cmp .to{font-size:64px;color:var(--red);font-family:"Bahnschrift",sans-serif;flex:0 0 auto;padding-left:0;border:0;}
+
+  /* 代码块 */
+  .code{
+    background:rgba(255,255,255,.045);border:1px solid rgba(239,233,221,.12);
+    border-radius:14px;padding:26px 30px;font-size:24px;line-height:1.85;
+    font-family:"Cascadia Mono","Consolas",monospace;color:#9fb0c6;
+    white-space:pre;overflow:hidden;
+  }
+  .code .k{color:#d98f7e;}
+  .code .s{color:#a8c69b;}
+  .code .c{color:#5b6473;}
+
+  .foot{
+    position:absolute;left:96px;right:96px;bottom:60px;z-index:2;
+    display:flex;align-items:center;justify-content:space-between;
+    font-size:25px;color:#565d6b;letter-spacing:2px;
+  }
+  .foot .pg{font-family:"Bahnschrift",sans-serif;font-size:29px;color:#7d8595;letter-spacing:0;}
+  .foot .pg em{font-style:normal;color:var(--red);}
+
+  /* 封面 */
+  .cover{justify-content:flex-start;padding-top:150px;}
+  .cover .brand{display:flex;align-items:center;gap:24px;margin-bottom:68px;}
+  .cover .brand img{width:104px;height:104px;border-radius:25px;}
+  .cover .brand div{font-size:33px;letter-spacing:8px;color:#cfd5df;}
+  .cover h1{font-size:106px;line-height:1.22;}
+  .cover .sub{margin-top:40px;font-size:34px;color:#98a0ae;letter-spacing:2px;line-height:1.75;}
+  .steps{margin-top:auto;}
+  .steps .it{display:flex;align-items:center;gap:18px;padding:13px 0;font-size:27px;color:#7c8492;}
+  .steps .it u{
+    text-decoration:none;font-family:"Bahnschrift",sans-serif;font-size:26px;
+    color:var(--red);width:96px;letter-spacing:1px;
+  }
+  .steps .it span{width:1px;height:26px;background:rgba(201,70,47,.45);}
+  .cover .stats{display:flex;gap:60px;margin-top:64px;}
+  .cover .stats div{font-size:25px;color:#6f7785;letter-spacing:2px;}
+  .cover .stats b{
+    display:block;font-size:70px;color:var(--paper);letter-spacing:0;line-height:1.1;
+    font-family:"Bahnschrift","DIN Alternate",sans-serif;margin-bottom:8px;
+  }
+  .cover .stats b em{font-style:normal;color:var(--red);font-size:40px;}
+
+  /* 结尾 */
+  .end{justify-content:space-between;padding-top:158px;padding-bottom:168px;}
+  .qr-row{display:flex;gap:56px;}
+  .qr-row figure{text-align:center;}
+  .qr-row img{width:238px;height:238px;border-radius:16px;background:#fff;padding:10px;object-fit:contain;}
+  .qr-row figcaption{margin-top:18px;font-size:26px;color:var(--dim);letter-spacing:2px;}
+  .dl .t{font-size:28px;color:var(--dim);letter-spacing:2px;}
+  .dl .u{
+    font-family:"Cascadia Mono","Consolas",monospace;
+    font-size:26px;color:#9aa3b2;margin-top:10px;word-break:break-all;line-height:1.6;
+  }
+</style>
+</head>
+<body>
+
+<!-- 1 封面 -->
+<section class="card cover" data-i="1">
+  <div class="brand"><img src="../ui/logo.png" alt="" /><div>墨　读</div></div>
+  <h1 class="serif">十二个版本<br />一本书<br />读到<em>九个平台</em></h1>
+  <div class="sub">0.6.1 → 0.6.12 更新全记录<br />从「每屏多塞 6 行字」到「可以自己写插件」</div>
+  <div class="steps">
+    <div class="it"><u>0.6.1</u><span></span>一屏 17 行变 23 行，换了新图标</div>
+    <div class="it"><u>0.6.3</u><span></span>Windows 之外，多出八个平台</div>
+    <div class="it"><u>0.6.5</u><span></span>搜不到书的老毛病，找到真凶</div>
+    <div class="it"><u>0.6.6</u><span></span>显示第 59 章，点进去第 660 章</div>
+    <div class="it"><u>0.6.8</u><span></span>换源卡 1.7 秒，降到 82 毫秒</div>
+    <div class="it"><u>0.6.12</u><span></span>扩展可以自己装了</div>
+  </div>
+  <div class="stats">
+    <div><b>12</b>个版本</div>
+    <div><b>60<em>+</em></b>项改动</div>
+    <div><b>9</b>个平台</div>
+    <div><b>0<em>元</em></b>开源免费</div>
+  </div>
+</section>
+
+<!-- 2 阅读 -->
+<section class="card" data-i="2">
+  <header>
+    <div class="top"><i></i><b>0.6.1</b><s>阅读体验</s></div>
+    <h1 class="serif">先让一屏<br />多塞<em>六行字</em></h1>
+    <p class="lead">正文底部一直白扔着 <em>96px</em> 内边距——<br />那是给一个根本没盖住正文的底栏留的。</p>
+  </header>
+  <div class="mid">
+    <div class="big">17<span class="to">→</span>23<span class="unit">行 / 屏</span></div>
+  </div>
+  <div class="row2">
+    <ul>
+      <li><span class="n">01</span><div>行距默认 <b>2.0 → 1.7</b>，段距从「由行距推算」拆成独立滑杆</div></li>
+      <li><span class="n">02</span><div>底栏两个按钮换成一个 <b>Aa</b>：字号、行距、段距、字体、翻页、主题</div></li>
+      <li><span class="n">03</span><div>拖动即时重排，不用退出重进看效果</div></li>
+    </ul>
+    <div class="shot"><img src="../.tmp-shot/phone-paged.png" alt="" /></div>
+  </div>
+</section>
+
+<!-- 3 图标 -->
+<section class="card" data-i="3">
+  <header>
+    <div class="top"><i></i><b>0.6.1</b><s>门面</s></div>
+    <h1 class="serif">换掉用了<br />两年的<br /><em>默认图标</em></h1>
+  </header>
+  <div class="mid logo-wrap">
+    <img src="../ui/logo.png" alt="" />
+    <div class="cap"><b>摊开的书 · 墨读 · 一道朱红</b>矢量画出来，一次生成全套：<br />ico 七帧、托盘、网页 180 / 192 / 512</div>
+  </div>
+  <ul>
+    <li><span class="n">01</span><div>小于 96px 自动去掉字标，只留书</div></li>
+    <li><span class="n">02</span><div>exe 的图标和版本号之前一直是 Electron 默认值，这次一并写上</div></li>
+    <li><span class="n">03</span><div>安卓自适应图标只露中间 66%，字标缩到 <em>0.75</em> 才不被裁</div></li>
+  </ul>
+</section>
+
+<!-- 4 九平台 -->
+<section class="card" data-i="4">
+  <header>
+    <div class="top"><i></i><b>0.6.2 – 0.6.3</b><s>跨平台</s></div>
+    <h1 class="serif">一个月<br />从一个平台<br />到<em>九个</em></h1>
+    <p class="lead">同一个前端，一套代码；打包脚本按平台补差异。</p>
+  </header>
+  <div class="mid plats">
+    <span>Windows</span><span>Linux x64</span><span>Linux arm64</span>
+    <span>macOS Intel</span><span>macOS ARM</span><span>Android</span>
+    <span>鸿蒙 NEXT</span><span>iOS</span><span>网页 PWA</span>
+  </div>
+  <ul>
+    <li><span class="n">01</span><div><b>macOS</b> 不能解压再压：framework 里 <em>Versions/Current</em> 是符号链接，压一次就废</div></li>
+    <li><span class="n">02</span><div><b>Linux</b> 的 tar 在 Windows 上按 NTFS 写入 0666，解压后程序没有执行权限</div></li>
+    <li><span class="n">03</span><div><b>鸿蒙</b> 要自己签：证书链得取模板里那张，拿错就 verify 失败</div></li>
+    <li><span class="n">04</span><div><b>iOS</b> 借 GitHub 的 Mac 机器编 ipa，Windows 上也能出包</div></li>
+  </ul>
+</section>
+
+<!-- 5 搜索 -->
+<section class="card" data-i="5">
+  <header>
+    <div class="top"><i></i><b>0.6.4 – 0.6.5</b><s>搜索</s></div>
+    <h1 class="serif">搜不到书<br /><em>不是源的问题</em></h1>
+    <p class="lead">搜索地址里的占位符从来没被替换。<br />站点收到的是 <span class="mono">q={{key}}</span>，当然返回零条。</p>
+  </header>
+  <div class="mid stats3">
+    <div><b>2815</b><i>个书源在库里</i></div>
+    <div><b>10</b><i>个源搜到了同一本</i></div>
+    <div><b>0<em>条</em></b><i>站点名当书名</i></div>
+  </div>
+  <ul>
+    <li><span class="n">01</span><div>加三道关：<b>洗标题</b>（砍掉「最新章节列表」这类噪声）、<b>算相关度</b>（0 分直接丢）、<b>猜结果</b>（规则失效时按链接归属）</div></li>
+    <li><span class="n">02</span><div>同一个名字在 N 个源都搜到，合并成<b>一张卡</b>，点标签就能换源</div></li>
+    <li><span class="n">03</span><div>一章拆三页的站，自动拼回来：<b>1154 字 → 6356 字</b></div></li>
+  </ul>
+</section>
+
+<!-- 6 目录 -->
+<section class="card" data-i="6">
+  <header>
+    <div class="top"><i></i><b>0.6.6</b><s>章节</s></div>
+    <h1 class="serif">显示第 59 章<br />点进去<em>第 660 章</em></h1>
+    <p class="lead">书架存的那个地址是「下载页」，上面只挂着倒序的最新章；<br />真目录在另一个字段里。</p>
+  </header>
+  <div class="mid cmp">
+    <div class="gone"><b>12</b><i>下载页 · 最新章节</i></div>
+    <div class="to">→</div>
+    <div><b>716</b><i>真实目录 · 全部章节</i></div>
+  </div>
+  <ul>
+    <li><span class="n">01</span><div>目录归一化：去重、按章号升序、番外和感言排到末尾</div></li>
+    <li><span class="n">02</span><div>进度定位四级兜底：标题 → 标题包含 → 中文数字章号 → 比例</div></li>
+    <li><span class="n">03</span><div>老书缓存的短目录自动重抓一次，不用手动删</div></li>
+  </ul>
+</section>
+
+<!-- 7 书源 -->
+<section class="card" data-i="7">
+  <header>
+    <div class="top"><i></i><b>0.6.8</b><s>换源</s></div>
+    <h1 class="serif">换源卡住<br />是因为它在<br /><em>同步等网络</em></h1>
+    <p class="lead">主线程最长阻塞时间。带脚本的书源一次请求要 0.8–1.6 秒，却和普通源一起并发。</p>
+  </header>
+  <div class="mid">
+    <div class="big tight">1693<span class="unit">ms</span><span class="arr">→</span>82<span class="unit">ms</span></div>
+  </div>
+  <ul>
+    <li><span class="n">01</span><div>拆成两条队列：普通源并发 10，<b>脚本书源默认不搜</b>，点了才跑</div></li>
+    <li><span class="n">02</span><div>高级源正文是 AES 密文，现在自己解，不再把 <em>{"code":1...}</em> 当正文显示</div></li>
+    <li><span class="n">03</span><div>书源的 <b>header</b> 字段从来没生效过——修好后那批「请求超时」的站能搜到了</div></li>
+  </ul>
+</section>
+
+<!-- 8 界面 -->
+<section class="card" data-i="8">
+  <header>
+    <div class="top"><i></i><b>0.6.9 – 0.6.11</b><s>界面</s></div>
+    <h1 class="serif">侧栏从 7 个<br />减到 <em>3 个</em></h1>
+  </header>
+  <ul>
+    <li><span class="n">01</span><div>只剩<b>书架 / 扩展 / 设置</b>。书源、历史、统计都收进扩展做二级页</div></li>
+    <li><span class="n">02</span><div>书签搬进目录面板，和目录一个抽屉；同一章存好几个位置也放得下</div></li>
+    <li><span class="n">03</span><div>设置拆成 <b>8 张模块卡</b>，点进去只看那一组，改完即时生效</div></li>
+    <li><span class="n">04</span><div>目录只算正文：封面、版权页、作者引言不再算章节，单独归到「卷首 · 附录」</div></li>
+    <li><span class="n">05</span><div>「继续阅读」卡片四边齐平，封面和右边文字、按钮上下对齐</div></li>
+  </ul>
+</section>
+
+<!-- 9 扩展 -->
+<section class="card" data-i="9">
+  <header>
+    <div class="top"><i></i><b>0.6.12</b><s>扩展</s></div>
+    <h1 class="serif">现在可以<br />给它<em>写插件</em>了</h1>
+    <p class="lead">一个 JSON，一段 HTML，拖进窗口就能用。<br />不用改源码，不用等发版。</p>
+  </header>
+  <div class="mid">
+    <div class="code"><span class="c">// 最小扩展：读取当前在读的书</span>
+{ <span class="k">"name"</span>: <span class="s">"阅读小助手"</span>, <span class="k">"version"</span>: <span class="s">"1.0.0"</span>,
+  <span class="k">"html"</span>: <span class="s">"&lt;div id=ctx&gt;…&lt;/div&gt;&lt;script&gt;
+    parent.postMessage({moread:'context'},'*')…"</span> }</div>
+  </div>
+  <div class="row2">
+    <ul>
+      <li><span class="n">01</span><div>面板跑在 <b>sandbox iframe</b>，靠 postMessage 要数据：<span class="mono">toast</span> <span class="mono">context</span> <span class="mono">search</span> <span class="mono">openBook</span></div></li>
+      <li><span class="n">02</span><div>三种导入：拖拽、粘贴、选文件（手机上拉系统选择器）</div></li>
+      <li><span class="n">03</span><div>存在 <b>data.json</b> 里，备份、换设备、导出恢复一起带走</div></li>
+    </ul>
+    <div class="shot" style="flex:0 0 262px;"><img src="../.tmp-shot/addon-panel.png" alt="" style="height:420px;" /></div>
+  </div>
+</section>
+
+<!-- 10 结尾 -->
+<section class="card end" data-i="10">
+  <header>
+    <div class="top"><i></i><b>完</b><s>下载</s></div>
+    <h1 class="serif">十二个版本写完<br />轮到<em>你去读</em>了</h1>
+  </header>
+  <div class="qr-row">
+    <figure><img src="../ui/gzh-qr.jpg" alt="" /><figcaption>公众号 · 更新都在这</figcaption></figure>
+    <figure><img src="../ui/douyin-qr.png" alt="" /><figcaption>抖音 · 有问题直接说</figcaption></figure>
+  </div>
+  <div class="dl">
+    <div class="t">GitHub Releases · v0.6.12</div>
+    <div class="u">github.com/RoutineMiku/MoRead-Windows</div>
+    <div class="t" style="margin-top:34px;">网页版直接打开，不用装</div>
+    <div class="u">routinemiku.github.io/MoRead-Windows</div>
+    <div class="t" style="margin-top:34px;color:#565d6b;">开源 · 免费 · 无广告 · 数据都在本地</div>
+    <div class="t" style="margin-top:22px;color:#f0b3a7;">下一张：扫码直接装安装包 →</div>
+  </div>
+</section>
+
+<!-- 11 下载安装包 -->
+<section class="card" data-i="11">
+  <div class="top"><i></i><b>附</b><s>下载安装包</s></div>
+  <h1 class="serif">扫这张码<br />装到<em>你的设备</em></h1>
+  <p class="lead">v0.6.12 · 九个平台同一个版本<br />按系统点一下就下载，不用在 Release 列表里翻</p>
+
+  <div style="display:flex;align-items:center;gap:56px;margin-top:64px;">
+    <img src="./download-qr.png" alt="下载页二维码" style="width:330px;height:330px;background:#fff;padding:14px;border-radius:20px;object-fit:contain;" />
+    <div style="font-size:28px;line-height:1.8;color:#b9c0cc;">
+      <b style="display:block;font-size:34px;color:var(--paper);margin-bottom:18px;">下载页</b>
+      长按保存这张图<br />用微信 / 浏览器「扫一扫」<br />
+      <span style="display:block;margin-top:22px;font-family:'Cascadia Mono',Consolas,monospace;font-size:22px;color:#8d95a3;line-height:1.6;">routinemiku.github.io<br />/MoRead-Windows/download.html</span>
+    </div>
+  </div>
+
+  <div class="plats" style="margin-top:64px;">
+    <span class="hot">Windows</span><span class="hot">安卓 APK</span><span>macOS</span><span>Linux</span>
+    <span>鸿蒙 HAP</span><span>iOS ipa</span><span>网页版</span>
+  </div>
+
+  <ul style="margin-top:56px;">
+    <li style="padding:18px 0;font-size:28px;"><span class="n">01</span><div>手机装 <b>安卓 APK（4.5 MB）</b>，鸿蒙装已签名 HAP</div></li>
+    <li style="padding:18px 0;font-size:28px;"><span class="n">02</span><div>电脑按系统选包，<b>解压即用</b>，不需要安装器</div></li>
+    <li style="padding:18px 0;font-size:28px;"><span class="n">03</span><div>不想装：<b>网页版</b>浏览器打开就能读</div></li>
+  </ul>
+
+  <p style="margin-top:48px;font-size:25px;color:var(--dim);letter-spacing:2px;">开源 · 免费 · 无广告 · 数据都在本地</p>
+</section>
+
+<div class="foot" id="foot">
+  <span>墨读 · 本地书与网文都能读</span>
+  <span class="pg"><em id="pn">01</em> / 11</span>
+</div>
+
+<script>
+  const i = Number(new URLSearchParams(location.search).get('i') || 1);
+  document.querySelectorAll('.card').forEach(c => {
+    if (Number(c.dataset.i) === i) c.classList.add('on');
+  });
+  document.getElementById('pn').textContent = String(i).padStart(2, '0');
+  if (i === 1 || i >= 10) document.getElementById('foot').style.display = 'none';
+</script>
+</body>
+</html>
