@@ -48,6 +48,14 @@ function giteeUrl() {
   return `https://${encodeURIComponent(GITEE_USER)}:${encodeURIComponent(t)}@gitee.com/${GITEE_USER}/${GITEE_REPO}.git`;
 }
 
+/* GitHub 的凭据不在 .git/config 里，也不一定能非交互读到；
+   设了 GH_TOKEN 就直接拼进 URL，没设就走 origin（可能因代理 502 失败）。 */
+function ghUrl() {
+  const t = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  if (!t) return null;
+  return `https://RoutineMiku:${encodeURIComponent(t)}@github.com/RoutineMiku/MoRead-Windows.git`;
+}
+
 function pushTo(remote, url, ref) {
   console.log(`\n▸ ${remote}  ${ref}`);
   return git('push', url || remote, ref);
@@ -56,6 +64,13 @@ function pushTo(remote, url, ref) {
 async function createGiteeRelease(tag, notes) {
   const token = process.env.GITEE_TOKEN;
   if (!token) return console.log('跳过 Gitee Release：没设 GITEE_TOKEN');
+  try {
+    const lr = await fetch(`https://gitee.com/api/v5/repos/${GITEE_USER}/${GITEE_REPO}/releases/latest?access_token=${token}`);
+    if (lr.ok) {
+      const j = await lr.json();
+      if (j && j.tag_name === tag) { console.log('Gitee Release 已存在：', tag); return true; }
+    }
+  } catch (e) { }
   const body = {
     access_token: token,
     tag_name: tag,
@@ -106,11 +121,11 @@ async function createGiteeRelease(tag, notes) {
   const okGitee = pushTo('gitee', gUrl, `${branch}:${branch}`);
   if (tag) pushTo('gitee', gUrl, tag);
 
-  let okGh = pushTo('origin', null, `${branch}:${branch}`);
-  if (tag) okGh = pushTo('origin', null, tag) && okGh;
+  let okGh = pushTo('origin', ghUrl(), `${branch}:${branch}`);
+  if (tag) okGh = pushTo('origin', ghUrl(), tag) && okGh;
   if (!okGh) {
-    console.log('\nGitHub 没推上去（多半是代理对 github.com 返回 502）。');
-    console.log('改用：GH_TOKEN=... node build/push-via-api.js（见 MEMORY 里的令牌取法）');
+    console.log('\nGitHub 没推上去（多半是凭据不可交互，或代理对 github.com 返回 502）。');
+    console.log('改用：GH_TOKEN=... npm run push   （令牌从 git credential 或 GitHub 设置里取）');
   }
 
   if (tag && has('--release')) {
