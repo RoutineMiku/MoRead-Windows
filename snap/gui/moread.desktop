@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=墨读
+Name[en]=MoRead
+Comment=本地优先的开源阅读器（EPUB / TXT / Legado 书源）
+Exec=moread %U
+Icon=${SNAP}/meta/gui/moread.png
+Terminal=false
+Categories=Office;Viewer;Literature;
+MimeType=application/epub+zip;text/plain;
+StartupWMClass=moread

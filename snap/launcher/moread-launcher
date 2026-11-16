@@ -1,0 +1,5 @@
+#!/bin/bash
+# strict confinement 下 chrome-sandbox 无法 setuid 提权，Electron 必须 --no-sandbox；
+# 隔离由 snap confinement 提供，不影响安全模型。
+# command-chain 会把真实命令（moread）作为参数传进来，末尾追加 --no-sandbox。
+exec "$@" --no-sandbox

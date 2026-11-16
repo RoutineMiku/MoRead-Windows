@@ -1,26 +1,52 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
+/* 正式发布签名：android/keystore.properties + moread-release.keystore（都不入库）。
+ * 商店只收正式签名的包；这个 keystore 丢了就永远无法更新已上架应用，务必异地备份。
+ * 文件不存在时退回 debug 签名，本地自测不受影响。 */
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { this.load(it) }
+}
+val hasReleaseKey = keystoreProps.getProperty("storeFile") != null &&
+    rootProject.file(keystoreProps.getProperty("storeFile") ?: "_").exists()
+
 android {
     namespace = "cn.moread.app"
-    compileSdk = 34
+    /* Google Play 自 2026-08-31 起：新应用必须 targetSdk 36（Android 16）。
+     * minSdk 26 = Android 8.0，覆盖 98%+ 设备；升级只影响编译目标，不改运行时行为。 */
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "cn.moread.app"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 613
         versionName = "0.6.13"
+    }
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
-            // 没配正式签名时用 debug 签名，保证「能装、能覆盖升级」
-            signingConfig = signingConfigs.getByName("debug")
+            // 有正式密钥用正式签名；没有再退回 debug（debug 包商店会拒收）
+            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release")
+                           else signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

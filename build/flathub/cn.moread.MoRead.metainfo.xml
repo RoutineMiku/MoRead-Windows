@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream 元数据：Flathub 要求，构建后放 /app/share/metainfo/cn.moread.MoRead.metainfo.xml -->
+<component type="desktop-application">
+  <id>cn.moread.MoRead</id>
+  <name>墨读 MoRead</name>
+  <summary>本地优先的开源阅读器</summary>
+  <summary xml:lang="en">Local-first open-source e-book reader</summary>
+  <developer id="github.com.RoutineMiku">
+    <name>RoutineMiku</name>
+  </developer>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <launchable type="desktop-id">cn.moread.MoRead.desktop</launchable>
+  <url type="homepage">https://github.com/RoutineMiku/MoRead-Windows</url>
+  <url type="bugtracker">https://github.com/RoutineMiku/MoRead-Windows/issues</url>
+  <description>
+    <p>墨读是一个本地优先的阅读器。书架、书源、阅读进度和备份都只存在你自己的设备上——没有账号、没有云端、不上传、不追踪。</p>
+    <ul>
+      <li>EPUB、TXT、本地文件夹导入，自动分章、生成目录</li>
+      <li>兼容 Legado（开源阅读）书源规则，可导入现成书源</li>
+      <li>字号、行距、字体、翻页方式可调，深色模式与护眼配色</li>
+      <li>系统语音朗读，可自动读下一章</li>
+      <li>进度、书签、批注存在本机，一键导出备份 zip</li>
+    </ul>
+    <p xml:lang="en">MoRead is a local-first reader. Your library, book sources, reading progress and backups all stay on your own device — no account, no cloud, no uploads, no tracking.</p>
+  </description>
+  <categories>
+    <category>Office</category>
+    <category>Viewer</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.6.13" date="2026-11-14">
+      <description>
+        <p>设置 → 关于新增「检查更新」；阅读器启动更快；扩展支持导入开发者面板；目录只统计正文章节。</p>
+      </description>
+    </release>
+  </releases>
+  <screenshots>
+    <screenshot type="default">
+      <image type="source" width="1920" height="1080">https://routinemiku.github.io/MoRead-Windows/store/01-shelf.png</image>
+      <caption>书架</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source" width="1920" height="1080">https://routinemiku.github.io/MoRead-Windows/store/02-reader.png</image>
+      <caption>阅读页</caption>
+    </screenshot>
+  </screenshots>
+</component>

@@ -39,6 +39,10 @@ Thumbs.db
 .DS_Store
 desktop.ini
 
+# 安卓发布签名：密码文件绝不入库；密钥库只留在本机并另行备份
+android/keystore.properties
+android/moread-release.keystore
+
 # 微软商店打包：SDK BuildTools（约 22MB）与自签私钥，只在本机用
 .msix-tools/
 build/msix-test.pfx

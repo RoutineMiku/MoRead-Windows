@@ -1,0 +1,56 @@
+app-id: cn.moread.MoRead
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: moread
+
+finish-args:
+  # Electron/Chromium 基本运行需求
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  # 语音朗读（TTS 走 PulseAudio/PipeWire）
+  - --socket=pulseaudio
+  # 读用户主动选择的书籍文件、保存书架与进度
+  - --filesystem=home
+  # 书源搜索 / 网页搜书需要联网
+  - --share=network
+  # Chromium 需要可写临时目录
+  - --env=TMPDIR=/var/tmp
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - '*.la'
+  - '*.a'
+
+modules:
+  # zypak：Flathub 官方的 Electron/Chromium 沙箱包装器（替代 --no-sandbox）
+  # 提交 flathub PR 前需要：git submodule add https://github.com/flathub/shared-modules
+  - shared-modules/zypak/zypak.json
+
+  - name: moread
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/moread
+      - cp -a moread chrome_crashpad_handler *.pak *.bin *.so* icudtl.dat version vk_swiftshader_icd.json resources /app/moread/
+      - mkdir -p /app/moread/locales && cp -a locales/. /app/moread/locales/
+      - install -Dm644 cn.moread.MoRead.desktop /app/share/applications/cn.moread.MoRead.desktop
+      - install -Dm644 moread.png /app/share/icons/hicolor/512x512/apps/cn.moread.MoRead.png
+      - mkdir -p /app/bin
+      # zypak-wrapper 负责 Chromium 沙箱，Electron 主程序以真实文件运行
+      - printf '#!/bin/sh\nexec zypak-wrapper.sh /app/moread/moread "$@"\n' > /app/bin/moread
+      - chmod 755 /app/bin/moread
+    sources:
+      - type: archive
+        url: https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.13/MoRead-linux-x64-0.6.13.tar.gz
+        sha256: c0f40127183afe92ed6b6685accaee129f95f4f2e768d8001e0130ab002c15d9
+        strip-components: 1
+      - type: file
+        path: cn.moread.MoRead.desktop
+      # 图标用仓库里的 ui/logo.png（512×512）
+      - type: file
+        url: https://raw.githubusercontent.com/RoutineMiku/MoRead-Windows/main/ui/logo.png
+        sha256: 27678723bca2517ce70f738750aca16a39ee3750b8586b997c6e03503751f4a1
+        dest-filename: moread.png

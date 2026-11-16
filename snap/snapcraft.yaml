@@ -1,0 +1,71 @@
+name: moread
+base: core22
+grade: stable
+confinement: strict
+compression: lzo
+version: '0.6.13'
+summary: 本地优先的开源阅读器（EPUB / TXT / Legado 书源）
+description: |
+  墨读是一个本地优先的阅读器。书架、书源、阅读进度和备份都只存在你自己的
+  设备上——没有账号、没有云端、不上传、不追踪。
+
+  · EPUB、TXT、本地文件夹导入，自动分章、生成目录
+  · 兼容 Legado（开源阅读）书源规则，可导入现成书源
+  · 字号、行距、字体、翻页方式可调，深色模式与护眼配色
+  · 系统语音朗读，可自动读下一章
+  · 一键导出备份 zip，原版「阅读」也能直接导入
+
+  开源（MIT）、免费、无广告。
+icon: snap/gui/moread.png
+license: MIT
+
+architectures:
+  # source 固定指向 x64 tar.gz，先只出 amd64；arm64 需要换 source 后另加 job
+  - build-on: amd64
+    build-for: amd64
+
+apps:
+  moread:
+    extensions: [gnome]
+    command: moread
+    command-chain:
+      - snap/command-chain/moread-launcher
+    desktop: snap/gui/moread.desktop
+    plugs:
+      - home
+      - removable-media
+      - network
+      - network-bind
+      - audio-playback
+      - desktop
+      - desktop-legacy
+      - unity7
+      - wayland
+
+parts:
+  moread:
+    plugin: dump
+    source: https://github.com/RoutineMiku/MoRead-Windows/releases/download/v0.6.13/MoRead-linux-x64-0.6.13.tar.gz
+    source-type: tar
+    stage-packages:
+      - libasound2
+      - libnspr4
+      - libnss3
+      - libxss1
+      - libxtst6
+      - xdg-utils
+      - libatspi2.0-0
+      - libuuid1
+      - libsecret-1-0
+    prime:
+      - -chrome-sandbox
+      - -install.sh
+      - -README.txt
+
+  launcher:
+    plugin: dump
+    source: snap/launcher
+    organize:
+      moread-launcher: snap/command-chain/moread-launcher
+    stage:
+      - snap/command-chain/moread-launcher

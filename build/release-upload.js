@@ -38,6 +38,8 @@ const VCODE = (() => {
 const WANTED = [
   [`MoRead-windows-${V}.zip`, 'Windows x64（免安装，解压双击 墨读.exe）'],
   [`MoRead-android-${V}.apk`, 'Android 7+'],
+  [`MoRead-linux-x64-${V}.deb`, 'Linux x64（deb，UOS/deepin/Ubuntu 商店规范）'],
+  [`MoRead-linux-arm64-${V}.deb`, 'Linux arm64（deb）'],
   [`MoRead-linux-x64-${V}.tar.gz`, 'Linux x64'],
   [`MoRead-linux-arm64-${V}.tar.gz`, 'Linux arm64（树莓派 / ARM 小主机）'],
   [`MoRead-mac-x64-${V}.zip`, 'macOS Intel'],
@@ -116,6 +118,8 @@ async function uploadAsset(releaseId, f) {
 const USAGE = [
   [/^MoRead-windows-/, 'Windows', 'Windows x64', '解压，双击 `墨读.exe`。免安装、不写注册表，数据跟着程序走'],
   [/^MoRead-android-/, 'Android', 'Android 7+', '直接安装（与桌面共用同一套阅读与书源逻辑）'],
+  [/^MoRead-linux-x64-.*\.deb$/, 'Linux x64 deb', 'Linux x64（deb）', '统信 UOS / deepin / Ubuntu 应用商店规范目录 `/opt/apps/cn.moread.app`，也可 `sudo apt install ./….deb`'],
+  [/^MoRead-linux-arm64-.*\.deb$/, 'Linux arm64 deb', 'Linux arm64（deb）', '同上，arm64 架构'],
   [/^MoRead-linux-x64-/, 'Linux x64', 'Linux x64', '`tar xzf …` 后跑 `./moread`，或 `./install.sh` 装桌面图标'],
   [/^MoRead-linux-arm64-/, 'Linux arm64', 'Linux arm64', '同上，树莓派 / ARM 小主机'],
   [/^MoRead-mac-x64-/, 'macOS Intel', 'macOS Intel', '解压得到 `MoRead.app`。**未签名**：首次打开要右键 → 打开，或 `xattr -dr com.apple.quarantine MoRead.app`'],

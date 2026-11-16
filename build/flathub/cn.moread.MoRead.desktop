@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=墨读
+Name[en]=MoRead
+GenericName=E-book Reader
+Comment=本地优先的开源阅读器（EPUB / TXT / Legado 书源）
+Comment[en]=Local-first open-source e-book reader
+Exec=moread %U
+Icon=cn.moread.MoRead
+Terminal=false
+Categories=Office;Viewer;Literature;
+MimeType=application/epub+zip;text/plain;
+Keywords=阅读;电子书;EPUB;TXT;小说;书源;reader;ebook;
+StartupWMClass=moread
