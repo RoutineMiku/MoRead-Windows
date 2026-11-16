@@ -22,6 +22,10 @@
     "harmony": "node build/gen-web.js && node build/sync-harmony.js",
     "harmony:pack": "node build/build-hap.js",
     "ios": "node build/gen-web.js && node build/sync-ios.js",
+    "android:release": "node build/android-build.js --release",
+    "android:bundle": "node build/android-build.js --release --bundle",
+    "deb": "node build/deb.js",
+    "copyright": "node build/soft-copyright.js",
     "release:publish": "node build/release-upload.js",
     "push": "node build/push-repos.js",
     "push:tag": "node build/push-repos.js --tag --release"

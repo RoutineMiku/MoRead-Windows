@@ -19,6 +19,8 @@ const ANDROID = path.join(ROOT, 'android');
 const ENV_DIR = path.join(ROOT, '.androidenv');
 
 const wantRelease = process.argv.includes('--release');
+/* Google Play 只收 AAB；--bundle 时 release 同时跑 bundleRelease 并把产物复制进 dist */
+const wantBundle = process.argv.includes('--bundle');
 const isWin = process.platform === 'win32';
 
 /* 构建前先把 ui/ 同步进 assets（并补 bridge.js 引用），
@@ -96,7 +98,11 @@ fs.writeFileSync(path.join(ANDROID, 'local.properties'),
 console.log('JDK     ' + java);
 console.log('SDK     ' + sdk);
 console.log('Gradle  ' + gradleExe);
-console.log('目标    ' + (wantRelease ? 'assembleRelease' : 'assembleDebug') + '\n');
+
+const task = wantRelease ? 'assembleRelease' : 'assembleDebug';
+const tasks = [task];
+if (wantRelease && wantBundle) tasks.push('bundleRelease');
+console.log('目标    ' + tasks.join(' + ') + '\n');
 
 const env = Object.assign({}, process.env, {
   JAVA_HOME: java,
@@ -105,8 +111,7 @@ const env = Object.assign({}, process.env, {
   GRADLE_USER_HOME: process.env.GRADLE_USER_HOME || path.join(os.homedir(), '.gradle')
 });
 
-const task = wantRelease ? 'assembleRelease' : 'assembleDebug';
-const r = spawnSync(gradleExe, ['--console=plain', '-p', ANDROID, task], {
+const r = spawnSync(gradleExe, ['--console=plain', '-p', ANDROID, ...tasks], {
   stdio: 'inherit', env, cwd: ANDROID, shell: isWin
 });
 
@@ -127,3 +132,37 @@ for (const f of apks) {
   console.log('\nAPK  ' + p + '  (' + size + ' MB)');
 }
 console.log('\n安装到手机： adb install -r "' + path.join(apkDir, apks[0] || '') + '"');
+
+/* bundleRelease 产物（Google Play 只收 AAB） */
+if (wantRelease && wantBundle) {
+  const aabDir = path.join(ANDROID, 'app', 'build', 'outputs', 'bundle', 'release');
+  if (existsDir(aabDir)) {
+    const aabs = fs.readdirSync(aabDir).filter(f => f.endsWith('.aab'));
+    for (const f of aabs) {
+      const p = path.join(aabDir, f);
+      console.log('AAB  ' + p + '  (' + (fs.statSync(p).size / 1048576).toFixed(1) + ' MB)');
+    }
+  }
+}
+
+/* release 构建：把带版本号的 apk / aab 复制进 dist，供 release-upload 与各商店上传 */
+if (wantRelease) {
+  try {
+    const V = require(path.join(ROOT, 'package.json')).version;
+    const DIST = path.join(ROOT, 'dist');
+    fs.mkdirSync(DIST, { recursive: true });
+    const copies = [];
+    if (apks[0]) copies.push([path.join(apkDir, apks[0]), path.join(DIST, `MoRead-android-${V}.apk`)]);
+    const aabDir = path.join(ANDROID, 'app', 'build', 'outputs', 'bundle', 'release');
+    if (existsDir(aabDir)) {
+      const aab = fs.readdirSync(aabDir).filter(f => f.endsWith('.aab'))[0];
+      if (aab) copies.push([path.join(aabDir, aab), path.join(DIST, `MoRead-android-${V}.aab`)]);
+    }
+    for (const [src, dst] of copies) {
+      fs.copyFileSync(src, dst);
+      console.log('→ dist/' + path.basename(dst));
+    }
+  } catch (e) {
+    console.error('复制到 dist 失败：' + (e && e.message));
+  }
+}
