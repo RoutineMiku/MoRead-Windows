@@ -1001,6 +1001,18 @@ html[data-layout="wide"] .page{
   padding-right:max(40px, calc(var(--corner) * .5));
 }
 
+/* 折叠屏展开后竖向握持：形态已经是平板 UI（左侧栏），但手是握在两侧窄边上，
+ * 侧栏按钮按横屏的 58px 偏小、书架按 132px 基数会挤成六七列。这里按竖握放宽。 */
+html[data-layout="wide"][data-orientation="portrait"] .rail{
+  width:84px;flex-basis:84px;
+}
+html[data-layout="wide"][data-orientation="portrait"] .rail-btn{
+  width:72px;min-height:52px;
+}
+html[data-layout="wide"][data-orientation="portrait"] .grid{
+  --shelf-base:150px;
+}
+
 /* ==================================================================
  * 兜底：万一原生侧没能把形态推给页面（初始化异常、WebView 过旧、桥接失败……）
  * 触屏设备也必须按移动端呈现，绝不能退回电脑版的小控件和窗口按钮。

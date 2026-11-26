@@ -341,10 +341,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 形态判定：
-     *  - 竖屏一律 portrait（底部导航）——竖向握持时底部比侧边顺手
-     *  - 横屏按最小宽度分 landscape（窄）/ wide（≥600dp，左栏加宽）
-     * sw 档位（compact/medium/expanded）另外给页面用来调栅格密度
+     * 形态判定：最小宽度 sw 是主信号，横竖屏只是辅助。
+     *  - sw≥600dp：平板 / 折叠屏展开 → wide（左侧栏平板 UI），横竖握持都算。
+     *    折叠屏展开内屏后常是竖向握持（内屏接近正方形，wDp 仍 < hDp），
+     *    只看横屏会把它判成 portrait，界面就只是把手机布局拉伸 —— 这正是
+     *    「展开内屏没反应」的根因。sw 从折叠态的 ~360dp 跳到 700+dp 才是可靠信号。
+     *  - sw<600dp 且横屏 → landscape（左侧窄栏）
+     *  - 其余 → portrait（底部导航）
+     * sw 档位（compact/medium/expanded）另外给页面用来调栅格密度。
      */
     fun layoutInfo(cfgIn: Configuration? = null): JSONObject {
         val cfg = cfgIn ?: resources.configuration
@@ -353,7 +357,7 @@ class MainActivity : AppCompatActivity() {
         val hDp = cfg.screenHeightDp
         val landscape = wDp > hDp || cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
         val mode = when {
-            landscape && sw >= 600 -> "wide"
+            sw >= 600 -> "wide"
             landscape -> "landscape"
             else -> "portrait"
         }

@@ -4282,6 +4282,9 @@ addEventListener('message', e => {
     const stage = $('#r-stage'), page = $('#r-page');
     const s = S.state.settings;
     if (!stage || !page) return;
+    /* debug 打点：分页是翻章最重的一段同步工作，超阈值打日志。
+       安卓端在 logcat 按 JS/W 过滤即可看到，验证优化效果不用猜。 */
+    const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
     /* 先确保 mode-paged 已生效，否则量到的是滚动模式的宽度 */
     $('#reader').classList.toggle('mode-paged', true);
 
@@ -4425,7 +4428,11 @@ addEventListener('message', e => {
      * 的探针真实排版每一页，超出就把末尾段落挪到下一页。
      *
      * 两道保险，缺一不可（踩过：没有上限时页面只有一段却永远装不下，会不停新建空白页，
-     * 直接把 WebView 卡死）：单页只剩一段就认输；总移动次数给个预算。 */
+     * 直接把 WebView 卡死）：单页只剩一段就认输；总移动次数给个预算。
+     *
+     * 性能：旧实现每挪一段就把整页 innerHTML 重建一次并读 scrollHeight（强制回流），
+     * 一章几十页、每页数次挪动就是上百次整页重建，是翻章卡顿的主因。现在按平均段高
+     * 一次估算要挪几段，每页最多实测几次，DOM 重建次数降一个数量级。 */
     if (pages.length) {
       const probe = mk('');
       try {
@@ -4437,17 +4444,23 @@ addEventListener('message', e => {
           b.innerHTML = parasMap(arr, imgMaxH());
           return probe.scrollHeight - probe.clientHeight;
         };
-        let budget = Math.max(30, pages.length * 6);
+        const avgH = Math.max(24,
+          heights.reduce((a, b) => a + b, 0) / Math.max(1, heights.length) + MB);
+        let budget = Math.max(12, pages.length * 5);
         const maxPages = pages.length * 2 + 3;
         for (let i = 0; i < pages.length && budget > 0; i++) {
-          while (budget-- > 0) {
+          let guard = 0;
+          while (budget-- > 0 && guard++ < 4) {
             const isLast = i === pages.length - 1;
-            if (overOf(pages[i], i === 0, isLast) <= 0) break;
-            if (pages[i].length <= 1) break;      // 只剩一段还装不下：宁可它满页，也不再推
-            if (pages.length >= maxPages) break;
-            const t = pages[i].pop();
-            if (!pages[i + 1]) pages.push([]);
-            pages[i + 1].unshift(t);
+            const over = overOf(pages[i], i === 0, isLast);
+            if (over <= 0 || pages[i].length <= 1 || pages.length >= maxPages) break;
+            /* 按溢出高度一次挪走足够多的段，而不是「挪一段 → 整页重建实测一次」 */
+            const need = Math.max(1, Math.min(pages[i].length - 1, Math.ceil(over / avgH)));
+            for (let k = 0; k < need; k++) {
+              const t = pages[i].pop();
+              if (!pages[i + 1]) pages.push([]);
+              pages[i + 1].unshift(t);
+            }
           }
         }
       } catch (e) {
@@ -4462,6 +4475,13 @@ addEventListener('message', e => {
     pagedKey = key;
     R.pages = pagedPages;
     R.page = clamp(R.page, 0, R.pages.length - 1);
+    if (t0) {
+      const ms = performance.now() - t0;
+      if (ms > 120) {
+        console.warn('[moread] 分页耗时 ' + ms.toFixed(0) + 'ms / ' +
+          R.paras.length + ' 段 / ' + pages.length + ' 页');
+      }
+    }
   }
 
   function updateProgress(reset) {
@@ -4480,21 +4500,41 @@ addEventListener('message', e => {
          章节段里」更新当前章。offscreen 段落有 content-visibility 会让 offsetTop
          略有浮动，但各段先后顺序不变，判定不受影响。 */
       if (R.buf && R.buf.length > 1) {
+        /* 章节段位置缓存：旧实现每帧遍历所有段读 offsetTop，缓冲段数随连续阅读
+           线性增长，越读越卡。段只会往后追加，已存在段的 top 不变 —— 缓存到
+           DOM 引用 + 容器宽度，只在段集合变化或转屏时重算，滚动帧只读 scrollTop。 */
         const secs = $$('#r-page .ch-sec');
-        const line = stage.scrollTop + stage.clientHeight * 0.4;
-        let cur = +secs[0].dataset.ci, curEl = secs[0];
-        for (const sec of secs) {
-          if (sec.offsetTop <= line) { cur = +sec.dataset.ci; curEl = sec; } else break;
+        if (!R._secPos || R._secPos.w !== stage.clientWidth ||
+            R._secPos.secs.length !== secs.length ||
+            R._secPos.secs.some((el, i) => el !== secs[i])) {
+          R._secPos = {
+            w: stage.clientWidth,
+            secs: Array.from(secs),
+            items: secs.map(sec => ({
+              ci: +sec.dataset.ci,
+              title: sec.dataset.title || '',
+              chars: +sec.dataset.chars || 0,
+              top: sec.offsetTop,
+              height: sec.offsetHeight
+            }))
+          };
         }
-        if (cur !== R.ci) {
-          R.ci = cur;
-          R.title = curEl.dataset.title || R.title;
-          R.chars = +curEl.dataset.chars || R.chars;
+        const items = R._secPos.items;
+        const line = stage.scrollTop + stage.clientHeight * 0.4;
+        let idx = 0;
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].top <= line) idx = i; else break;
+        }
+        const curEl = items[idx];
+        if (curEl.ci !== R.ci) {
+          R.ci = curEl.ci;
+          R.title = curEl.title || R.title;
+          R.chars = curEl.chars || R.chars;
           $('#r-title').innerHTML = `${esc(b.name)}<em>${esc(R.title)}</em>`;
           $('#r-info').textContent = `本章 ${R.chars.toLocaleString()} 字`;
           updateTocActive();
         }
-        within = clamp((line - curEl.offsetTop) / Math.max(1, curEl.offsetHeight), 0, 1);
+        within = clamp((line - curEl.top) / Math.max(1, curEl.height), 0, 1);
       }
       overall = ((R.ci + within) / Math.max(1, b.total)) * 100;
     }
@@ -4519,11 +4559,14 @@ addEventListener('message', e => {
     R.noAnim = true;                     // 重排不是翻页，别连播两次翻页动画
     try {
       pagedKey = '';                     // 强制按新尺寸重排
-      renderChapter(0);
+      /* 原实现为了先拿到新页数再定位，renderChapter(0) 连调两次 —— 手机点屏
+         唤出/收起工具栏是高频率操作，每次都把整页 DOM 重建 + 动画做两遍。
+         layoutPages() 只算分页不碰正文 DOM，定位后渲染一次即可。 */
+      layoutPages();
       if (before > 1 && R.pages.length > 1) {
         R.page = clamp(Math.round(ratio * (R.pages.length - 1)), 0, R.pages.length - 1);
-        renderChapter(0);
       }
+      renderChapter(0);   // 入参是翻页方向（0=淡入），页码已写进 R.page
     } finally { R.noAnim = false; }
     updateProgress(true);
   }

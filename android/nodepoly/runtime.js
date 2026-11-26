@@ -1401,14 +1401,20 @@
   /* ==================================================================
    * 10. 横竖屏 / 折叠屏布局
    *
-   * 关键：方向以「页面自己看到的视口宽高」为准，原生推送只当参考。
-   * 原生那一路可能丢（页面还没就绪时 evaluateJavascript 白送）、可能慢一拍，
-   * 也可能与 WebView 实际视口不一致；而 window.innerWidth/innerHeight 不会说谎。
-   * 最小宽度（sw）反过来只能信原生——折叠屏折叠/展开会变，页面自己算不出来。
+   * 形态以「最小宽度 sw」为主信号，方向以「页面自己看到的视口宽高」为辅。
    *
-   *   portrait  竖屏：底部导航
-   *   landscape 横屏：左侧栏
-   *   wide      横屏且最小宽度 ≥600dp（平板 / 折叠屏展开）：左侧宽栏
+   * 为什么不能只看 w>h：折叠屏展开内屏后经常是竖向握持（内屏接近正方形，
+   * 2200×2480 之类），wDp 仍小于 hDp，用横屏判定会得到 portrait —— 于是
+   * 界面只做拉伸、底部导航，而不是平板 UI。展开真正可靠的信号是 sw 跳变
+   * （折叠 ~360dp → 展开 700+dp），且它与横竖握持无关。
+   *
+   * sw 优先用原生给的 smallestScreenWidthDp；但原生推送可能丢失/慢一拍，
+   * 此时用视口短边兜底（WebView 里 1 CSS px ≈ 1dp，innerWidth/innerHeight
+   * 就是当前窗口尺寸），两者取较大者，宁可判成平板也不要退回拉伸。
+   *
+   *   portrait  手机竖屏（sw<600）：底部导航
+   *   landscape 手机横屏（sw<600）：左侧窄栏
+   *   wide      平板 / 折叠屏展开（sw≥600，横竖握持都算）：左侧宽栏 = 平板 UI
    * ================================================================== */
   const nativeInfo = { mode: null, sw: 0, bucket: '', insets: null, corners: null };
 
@@ -1435,12 +1441,22 @@
     return 'compact';
   }
 
+  /** 当前最小宽度（dp）。原生值优先，视口短边兜底，取较大者。
+   *  取大而不是只信原生：折叠屏展开那一刻原生推送可能还没到（或整个丢了），
+   *  视口已经变宽，仍应立刻切到平板 UI；反过来原生说展开、视口暂时没刷新，
+   *  也不该缩回手机布局。 */
+  function effectiveSw(v) {
+    return Math.max(nativeInfo.sw > 0 ? nativeInfo.sw : 0, Math.min(v.w || 0, v.h || 0));
+  }
+
   function detectMode() {
     const v = viewportSize();
     if (!v.w || !v.h) return nativeInfo.mode || 'portrait';
-    const sw = nativeInfo.sw > 0 ? nativeInfo.sw : Math.min(v.w, v.h);
-    // 宽 > 高 就是横屏，不再看原生给的 orientation（它跟视口可能不一致）
-    if (v.w > v.h) return sw >= 600 ? 'wide' : 'landscape';
+    const sw = effectiveSw(v);
+    /* 展开 / 平板优先：sw≥600dp 时无论横竖握持都用左侧栏的平板 UI。
+       只有 sw<600 的普通手机才按视口宽高区分横竖屏。 */
+    if (sw >= 600) return 'wide';
+    if (v.w > v.h) return 'landscape'; // 不再看原生 orientation（它可能跟视口不一致）
     return 'portrait';
   }
 
@@ -1493,13 +1509,29 @@
     const mode = detectMode();
     de.setAttribute('data-layout', mode);
     const v = viewportSize();
-    const sw = nativeInfo.sw > 0 ? nativeInfo.sw : Math.min(v.w || 360, v.h || 640);
-    de.setAttribute('data-sw', nativeInfo.bucket || bucketOf(sw));
+    /* 方向单独记一份：展开态是 wide，但竖握 / 横握的侧栏宽度、触摸热区不同。
+       这里只看视口宽高，不看原生 orientation（后者可能跟 WebView 不一致）。 */
+    de.setAttribute('data-orientation', v.w > v.h ? 'landscape' : 'portrait');
+    /* data-sw 必须跟 data-layout 用同一个 sw 源，否则会出现
+       data-layout="wide" 配 data-sw="compact" 的自相矛盾状态。 */
+    const sw = effectiveSw(v);
+    de.setAttribute('data-sw', bucketOf(sw));
     window.__moreadLayout = mode;
     if (!nativeInfo.insets) { try { nativeInfo.insets = NB.call('env.insets'); } catch (e) { } }
     applyInsets(nativeInfo.insets);
     if (!nativeInfo.corners) { try { nativeInfo.corners = NB.call('env.corners'); } catch (e) { } }
     applyCorners(nativeInfo.corners);
+    /* debug：控制台调 __moreadDebug() 能看到完整判定依据。
+       折叠屏展开没切平板 UI 时，一眼看清 sw / 视口 / 原生推送到底拿到了什么。 */
+    window.__moreadDebug = () => ({
+      layout: mode,
+      orientation: v.w > v.h ? 'landscape' : 'portrait',
+      sw, bucket: bucketOf(sw),
+      viewport: [v.w, v.h],
+      nativeSw: nativeInfo.sw,
+      insets: nativeInfo.insets,
+      corners: nativeInfo.corners
+    });
     return mode;
   }
 
